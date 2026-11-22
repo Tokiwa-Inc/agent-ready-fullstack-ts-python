@@ -823,6 +823,29 @@ What to expect, because it is not all free:
   - If you moved `filled.py`, `backend/tests/test_list_debt.py` fails to import it. Point its
     import at yours, as you did in the tests that read each GET route.
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
+- **From 0.90.0 the commit gate runs the live contract suite.** `make gate-commit` now runs
+  `make test-contract`, which starts the backend and the dev server on `127.0.0.1`. After the
+  update:
+  - If your `Makefile` has its own `gate-commit:` line, add `test-contract` to it. If your
+    `test-commit` target prints its own list of what did not run, remove the live contract
+    suite from it.
+  - If you keep your own `tests/test_commit_gate.py`, add `"test-contract"` to the targets that
+    `gate-commit` expects, and delete the assert that `test-contract` is not reached.
+  - If you merged `devtools/gate.sh` by hand, take the template's
+    `unset DATABASE_URL CONTRACT_BASE_URL BACKEND_PORT FRONTEND_PORT` and its
+    `test-contract   SKIPPED` line.
+  - If you merged `devtools/contract-test.sh` or `frontend/vite.config.ts` by hand, take the
+    template's `127.0.0.1` in place of `localhost`: the `--host` of vite, `base_url` and the
+    proxy `target`.
+  - If your live contract suite needs a browser or a database, it does not fit the commit gate.
+    Move that part to a target of its own that `make suite` runs.
+  - Run `make pre-commit` on the smallest machine that commits, on three different trees. If
+    the largest run is above `BUDGET`, set `BUDGET` about a third above it.
+  - In `docs/development.md`, take the template's bullets that start "The hook runs
+    `make gate-commit`", "A commit-gate test takes less than", "The live contract suite serves
+    and asks" and "The gate runner unsets". In `AGENTS.md`, take the bullet that starts "A
+    commit-gate test". In `CONTEXT.md`, take the "Commit gate" entry.
+  [adr/template/0014](adr/template/0014-the-gate-runs-once-per-tree-and-one-at-a-time.md) says why.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

@@ -55,6 +55,34 @@ def test_a_green_gate_is_not_run_again_over_the_same_tree(tmp_path: Path):
     assert "already passed the commit gate" in second.stderr
 
 
+def test_the_gate_reads_no_database_and_no_port_from_the_committer_shell(tmp_path: Path):
+    clone = a_clone_with_a_gate(
+        tmp_path,
+        'echo "[$${DATABASE_URL:-}][$${CONTRACT_BASE_URL:-}][$${BACKEND_PORT:-}][$${FRONTEND_PORT:-}]"'
+        " >> ran.log",
+    )
+    tools = clone.parent / "bin"
+
+    result = subprocess.run(
+        ["sh", "devtools/gate.sh"],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+            "DATABASE_URL": "postgres://committer/own",
+            "CONTRACT_BASE_URL": "http://127.0.0.1:8000",
+            "BACKEND_PORT": "8001",
+            "FRONTEND_PORT": "5174",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (clone / "ran.log").read_text() == "[][][][]\n"
+
+
 def test_a_green_run_over_budget_fails_and_is_still_remembered_as_passed(tmp_path: Path):
     """Over budget is a regression to find, not a reason to run the same tree again: the retried
     commit of that tree skips the gate."""

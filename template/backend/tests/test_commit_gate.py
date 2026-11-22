@@ -12,8 +12,8 @@ def test_the_commit_gate_keeps_static_checks_and_selects_commit_tests() -> None:
         "lint-check",
         "openapi-check",
         "test-commit",
+        "test-contract",
     ]
-    assert "test-contract" not in reached_from("gate-commit")
     assert recipe_of("test-commit-backend") == [
         "cd backend && uv run --no-sync pytest -q --ignore=tests/started --ignore-glob='*/slow'"
     ]

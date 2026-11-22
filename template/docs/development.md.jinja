@@ -48,8 +48,9 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 ## The gate
 
 - **The hook runs `make gate-commit` through `make pre-commit`.** It checks secrets, lint,
-  types and contract artifacts. It runs backend tests outside `tests/started/` and the frontend
-  Node and smoke projects. Both halves exclude directories named `slow` at any depth.
+  types and contract artifacts. It runs backend tests outside `tests/started/`, the frontend
+  Node and smoke projects, and the live contract suite. Both halves exclude directories named
+  `slow` at any depth.
   It names the checks that `make suite` adds. CI or the release caller runs them, not you.
 - **`make suite` runs all default tests and builds the frontend.** It includes the started
   app, slow tests, every frontend test and the live contract suite. It does not select the opt-in tiers below.
@@ -85,7 +86,8 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   included. To find the limit
   on this machine, divide 0.5 by the number that `uv run python devtools/reference_core.py`
   prints in `backend/`. `pytest --durations=0` and `vitest run --reporter=json` give the time of
-  each test. No test holds this rule.
+  each test. No test holds this rule. It does not cover the start of both halves in
+  `make test-contract`. `BUDGET` holds that.
 - **A test that walks `app/` stays in the commit gate.** It reads `app/` through
   `tests/source.py`, which parses every module once per process. Then each further test costs
   only its own walk. A test under `slow/` runs only in the full suite, not in the commit gate.
@@ -203,8 +205,8 @@ tiers, the migration targets and the per-half variants. `make observe` starts Gr
 Prometheus and prints the `OTEL_*` variables to export.
 
 `BACKEND_PORT`, `FRONTEND_PORT` and `PREVIEW_PORT` move every server, so a second checkout can run
-at the same time. `make test-contract` takes two free ports unless you set them, so the gate does
-not fail while another checkout serves on 8000 or 5173.
+at the same time. `make test-contract` takes two free ports unless you set them. The gate runner
+unsets them, so the gate does not fail while another checkout serves on 8000 or 5173.
 
 Each half also works with its own tools: `pnpm -C frontend test:watch`,
 `pnpm -C frontend add some-package`, `cd backend && uv run pytest -q tests/routes/`,
@@ -232,3 +234,13 @@ below fails only later, as a server that holds its port.
   shortcuts work.
 - **`contract-test.sh` takes both ports in one process.** Two separate requests can return the
   same port, and the gate then fails at random.
+- **The live contract suite serves and asks on `127.0.0.1`, never on `localhost`.** That
+  covers vite, its proxy to the backend and the suite's requests. Where `/etc/hosts` gives
+  `localhost` both `::1` and `127.0.0.1`, vite listens on `::1` alone. Node's `fetch` connects to
+  `127.0.0.1`, and every contract test fails with `ECONNREFUSED`. The health probe uses `curl`,
+  which tries `::1`, so the probe passes and the suite then fails. A Docker container on its
+  default network has that `/etc/hosts`.
+- **The gate runner unsets `DATABASE_URL`, `CONTRACT_BASE_URL`, `BACKEND_PORT` and
+  `FRONTEND_PORT`.** With `DATABASE_URL` set, the live contract suite runs on that database and
+  deletes its tasks. With `CONTRACT_BASE_URL` or a port set, the suite can run against a
+  `make dev` that is running, and delete its tasks.

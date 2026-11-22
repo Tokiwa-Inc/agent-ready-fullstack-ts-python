@@ -15,14 +15,30 @@ A hook runs only where a committer installed it. A commit through an API, a web 
 `--no-verify` runs no hook. A coding agent that commits through an API is such a committer.
 A coding agent often works in a sandbox with two cloud vCPUs. A slow commit gate costs it
 many minutes before each commit. One downstream commit gate took 16 minutes there.
+The contract suite runs each case against the mock handlers and against the real backend.
+A commit gate that runs only the contract suite against the mock handlers cannot find a
+difference between the mock handlers and the backend.
+On one downstream project, a mock handler that did not follow the backend passed the commit
+gate twice. Attachments broke on 2026-11-18 for 4 builds. Charter links broke on 2026-11-21 for
+10 builds. Each break failed only in `make suite`.
 
 ## Decision
 
 The hook calls `make pre-commit`. Its runner calls `make gate-commit`.
-This stage retains static checks, backend tests that do not start the app, and frontend Node
-and smoke tests. Both halves exclude directories named `slow` at any depth.
+This stage retains static checks, backend tests that do not start the app, frontend Node
+and smoke tests, and the live contract suite. Both halves exclude directories named `slow` at
+any depth.
 `tests/test_commit_gate.py` holds the target boundaries.
 `tests/slow/test_commit_gate.py` proves the backend selection.
+
+A check that compares the mock handlers with the backend runs against both in the commit gate.
+The live contract suite is that check. `make test-contract` starts the backend and the dev
+server on two free ports on `127.0.0.1`, and runs the suite through the dev proxy.
+It needs no browser and no database. The runner unsets `DATABASE_URL`, `CONTRACT_BASE_URL`,
+`BACKEND_PORT` and `FRONTEND_PORT`. So a committer's shell cannot point the suite at a database
+or at a server in use.
+The per-test limit below does not hold the live contract suite: its setup is one start of both
+halves. `BUDGET` holds its cost.
 
 A commit-gate test takes less than 0.5 seconds on the clock, on the reference core.
 Its setup counts. A test that takes longer lives under its subject's `slow/` directory.
@@ -69,9 +85,10 @@ A committer waits that time, so the budget measures it directly.
 `tests/devtools/slow/test_gate_budget.py` holds the budget.
 `BUDGET` is sized for the smallest machine that commits: a cloud sandbox with two vCPUs.
 Nothing else runs in that sandbox, so its clock measures the gate alone.
-On 2026-11-17, three runs on an `E2_HIGHCPU_8` machine limited to two CPUs took 40 to 41 seconds.
-`BUDGET` is about a third above the largest of the three runs.
-The same gate took 12 to 34 seconds on an 18-core Mac at load 9 to 26.
+On 2026-11-22, six runs on an `E2_HIGHCPU_8` machine limited to two CPUs took 52 to 54 seconds.
+The live contract suite took 12 seconds of each.
+`BUDGET` is about a third above the largest of those runs.
+The gate took 43 to 45 seconds on an 18-core Mac at load 21.
 Lock wait time consumes none of that budget.
 `test_a_gate_that_waited_its_turn_is_not_charged_for_the_wait` holds that.
 An over-budget run fails after recording its successful checks. A retry can reuse that record.
@@ -82,6 +99,12 @@ CI calls the full target directly, so a missing half fails.
 
 ## Considered options
 
+- Leave the live contract suite to `make suite`. A mock that does not follow the backend then
+  passes the commit gate, and an agent stops when the commit gate passes. `AGENTS.md` says that
+  a mock handler refuses every case the backend refuses. Nothing in a backend change points to
+  the mock, so the agent does not know when that rule applies.
+- Generate the mock handlers from the backend. A generator removes a copy that the backend can
+  write, such as a table of roles. It cannot find drift in a handler that a person writes.
 - Move every DOM test after merge. Cheap component and API smoke tests provide useful local feedback.
 - Select tests from their last measured duration. Machine speed and fixture attribution change that selection.
 - Replace the existing full target with a smaller target. Existing CI callers could silently lose coverage.
@@ -121,8 +144,11 @@ CI calls the full target directly, so a missing half fails.
 
 A successful commit gate does not prove that the full suite passed.
 The frontend configuration separates Node tests from DOM setup.
-The full target includes every default test, live contracts and the production build.
+The full target includes every default test, the live contract suite and the production build.
 A release caller binds its result to the exact source revision and stops on failure or absence.
+
+A machine that cannot start both halves on `127.0.0.1` fails the commit gate.
+Each run takes two free ports, so checkouts and projects do not collide.
 
 The lock coordinates only calls through `make pre-commit`.
 Direct test commands and other repositories can still compete for CPU.

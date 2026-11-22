@@ -32,6 +32,7 @@ def test_a_partial_install_runs_only_its_half_and_records_no_pass(
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == f"selected-{half}"
     assert "PARTIAL RUN" in result.stderr
+    assert "test-contract   SKIPPED" in result.stderr
     assert "full suite      NOT RUN" in result.stderr
     assert "s on the clock of a 600s budget" in result.stderr
     assert not (clone / ".git/gate-commit-passed").exists()

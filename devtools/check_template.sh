@@ -837,6 +837,8 @@ done
 need_grep 'BACKEND_PORT' devtools/dev.sh "Each port comes from the environment, so two checkouts can run at once."
 need_grep 'FRONTEND_PORT' devtools/dev.sh
 need_grep 'BACKEND_PORT' devtools/contract-test.sh
+need_grep 'dev:live --host 127.0.0.1' devtools/contract-test.sh "Where /etc/hosts gives localhost both ::1 and 127.0.0.1, vite listens on ::1 alone, and every live contract fails with ECONNREFUSED."
+need_grep 'http://127.0.0.1:\${BACKEND_PORT}' frontend/vite.config.ts "uvicorn listens on 127.0.0.1 only, so a proxy to localhost depends on how the host resolves it."
 for loop in devtools/dev.sh devtools/contract-test.sh; do
     need_grep 'python -m app.worker' "$loop" "On Postgres a job is ended by the worker process. A loop without one leaves every job pending. Only a loop of two processes shows code that needs the memory of one process (docs/adr/template/0027)."
 done

@@ -400,8 +400,12 @@ decision it records, so the directory listing is the index. Its
 ## Verification
 
 **Commit gate**: `make gate-commit`, run by the hook through `make pre-commit`.
-It checks static rules and the selected local tests. Its pass record certifies only this gate.
+It checks static rules, the selected local tests and the live contract suite.
+Its pass record certifies only this gate.
 Every committer runs it, an agent that commits through an API included.
+
+**Live contract suite**: the contract suite against the real backend, through the dev proxy.
+`make test-contract` runs it. The same suite against the mock handlers is a frontend test.
 
 **Reference core**: one core of a Cloud Build `E2_HIGHCPU_32` machine.
 `backend/devtools/reference_core.py` names it. The time limit of a commit-gate test and

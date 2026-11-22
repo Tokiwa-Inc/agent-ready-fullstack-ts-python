@@ -91,7 +91,8 @@ fans out to both. Each half works without the other's toolchain.
   before it commits.
 - A commit-gate test takes less than 0.5 seconds on the reference core. Move a test that takes
   longer under `slow/` beside its subject. A test that walks `app/` stays: read the tree through
-  `tests/source.py`.
+  `tests/source.py`. The start of both halves in `make test-contract` is outside this limit.
+  `BUDGET` holds it.
 - When a complexity gate fails, split the function. Do not raise a threshold to get green.
 - When the startup gate fails, import the package where it is used. Do not record a rise to get
   green.
