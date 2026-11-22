@@ -607,10 +607,11 @@ class PostgresDatabase:
 
     def reading(self, tenant_id: str) -> AbstractAsyncContextManager[Any]:
         """A connection inside a READ ONLY transaction that has set `tenant_id`, which every
-        statement that only reads tenant data runs in. In a GET request, it is the request's
-        snapshot of the tenant: one REPEATABLE READ transaction for the request, in which each
-        answer is kept. Otherwise, a transaction of its own. Inside `app.store.jobs.fenced`, the
-        transaction is not READ ONLY, and holds the claim as `scoped` does.
+        statement that only reads tenant data runs in. In a GET request that read `tenant_id`
+        first, it is the request's snapshot: one REPEATABLE READ transaction for the request, in
+        which each answer is kept. Otherwise, a transaction of its own. Inside
+        `app.store.jobs.fenced`, the transaction is not READ ONLY, and holds the claim as
+        `scoped` does.
 
         A write raises `ReadOnlySQLTransactionError`. Raises as `lent` raises, and raises
         `ReadInsideARead` inside a read of a snapshot. `docs/adr/template/0033`."""

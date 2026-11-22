@@ -1,14 +1,15 @@
-"""The reads of a GET request: one snapshot for each tenant, one connection, and each answer
-once. `docs/adr/template/0033`.
+"""The reads of a GET request: one snapshot, one connection, and each answer once.
+`docs/adr/template/0033`.
 
-A snapshot is one transaction, READ ONLY and REPEATABLE READ. It opens at the first read of its
-tenant in the request. It ends before the response starts, after a write to its tenant, and
-after a read in it fails in the database. The next read then opens a new one. Each read of a
-snapshot runs on its one connection, one at a time. The same statement with the same arguments
-reaches the database once in a snapshot.
+A snapshot is one transaction, READ ONLY and REPEATABLE READ. It opens at the first read of the
+request, and it is of the tenant that read names. A read of another tenant runs alone. It ends
+before the response starts, after a write to its tenant, and after a read in it fails in the
+database. The next read then opens a new one. Each read of a snapshot runs on its one
+connection, one at a time. The same statement with the same arguments reaches the database once
+in a snapshot.
 
 A read runs alone, in a transaction of its own, outside a GET request, in work beside the
-requests, in shared work other than a turn of a loader, and after the request's snapshots end.
+requests, in shared work other than a turn of a loader, and after the request's snapshot ends.
 """
 
 import asyncio
@@ -206,10 +207,10 @@ class _Snapshot:
 
 
 class Snapshots:
-    """The snapshots of one scope of `snapshotted`: one for each `whose`."""
+    """The snapshot of one scope of `snapshotted`: of the first `whose` that the scope reads."""
 
     def __init__(self) -> None:
-        self._each: Final[dict[Hashable, _Snapshot]] = {}
+        self._first: tuple[Hashable, _Snapshot] | None = None
         self._ended: bool = False
 
     def of(
@@ -217,29 +218,20 @@ class Snapshots:
     ) -> _Snapshot | None:
         if self._ended:
             return None
-        if whose not in self._each:
-            self._each[whose] = _Snapshot(opened, ends)
-        return self._each[whose]
+        if self._first is None:
+            self._first = (whose, _Snapshot(opened, ends))
+        first, snapshot = self._first
+        return snapshot if first == whose else None
 
     async def forget(self, whose: Hashable) -> None:
-        snapshot = self._each.get(whose)
-        if snapshot is not None:
-            await snapshot.forget()
+        if self._first is not None and self._first[0] == whose:
+            await self._first[1].forget()
 
     async def end(self) -> None:
-        """End each snapshot, and read alone from now on. Raises what ending one snapshot
-        raised, after it ends the others, or an `ExceptionGroup` when more than one raised."""
+        """End the snapshot, and read alone from now on. Raises what ending it raised."""
         self._ended = True
-        for snapshot in self._each.values():
-            snapshot.ended = True
-        ended = await asyncio.gather(
-            *(snapshot.end() for snapshot in self._each.values()), return_exceptions=True
-        )
-        failed = [failure for failure in ended if isinstance(failure, BaseException)]
-        if len(failed) == 1:
-            raise failed[0]
-        if failed:
-            raise BaseExceptionGroup("more than one snapshot did not end", failed)
+        if self._first is not None:
+            await self._first[1].end()
 
 
 def _borrows() -> bool:
@@ -253,9 +245,10 @@ async def reading(
     whose: Hashable, opened: Unit, alone: Unit, ends: tuple[type[BaseException], ...]
 ) -> AsyncGenerator[Any]:
     """A connection to read on. In a GET request, the snapshot of `whose`, which `opened()`
-    opens at the first read: a transaction that is READ ONLY and REPEATABLE READ. Otherwise
-    `alone()`. `whose` names everything that a snapshot must not cross: the database and the
-    tenant.
+    opens at the first read: a transaction that is READ ONLY and REPEATABLE READ. A request has
+    the snapshot of the first `whose` it reads, and reads each other `whose` in `alone()`, so its
+    reads hold one connection however many tenants it reads. Otherwise `alone()`. `whose` names
+    everything that a snapshot must not cross: the database and the tenant.
 
     In the snapshot, a read waits until the read before it ends, and its answer is kept for the
     snapshot. A read that raises one of `ends`, or is cancelled, ends the snapshot, and raises in
@@ -281,8 +274,8 @@ async def written(whose: Hashable) -> None:
 
 @asynccontextmanager
 async def snapshotted() -> AsyncGenerator[Snapshots]:
-    """A scope of snapshots, which `reading` reads in. Each GET request is one. A task started
-    inside the scope, such as an item of an `asyncio.TaskGroup`, shares it. Each snapshot ends
+    """A scope of a snapshot, which `reading` reads in. Each GET request is one. A task started
+    inside the scope, such as an item of an `asyncio.TaskGroup`, shares it. The snapshot ends
     when the scope does, or at `Snapshots.end`."""
     snapshots = Snapshots()
     opened = _SNAPSHOTS.set(snapshots)
@@ -314,8 +307,8 @@ class SnapshotsPerRequest:
 
 
 def instrument(app: FastAPI) -> None:
-    """Give each GET and HEAD request that `app` serves snapshots of its own, which end before
+    """Give each GET and HEAD request that `app` serves a snapshot of its own, which ends before
     its response starts. A part of `GET /reads` is a request of its own, so it gets its own.
-    Call it before `request_events.instrument`, so each snapshot ends before the request event
+    Call it before `request_events.instrument`, so the snapshot ends before the request event
     is recorded."""
     app.add_middleware(SnapshotsPerRequest)
