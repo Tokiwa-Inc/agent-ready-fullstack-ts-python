@@ -212,6 +212,21 @@ slow-request alert uses it as its threshold. Each wait in a request on a system 
 process has a bound under it.
 _Avoid_: request timeout, deadline.
 
+**Limit**:
+The size a finite response is expected to stay under: `RESPONSE_MAX_BYTES`, or the size a route
+declares with `response_limits.allow`. A response over its limit is sent and reported.
+`docs/adr/template/0028`.
+_Avoid_: budget, bound, maximum.
+
+**Ceiling**:
+The size no finite response passes: `RESPONSE_CEILING_BYTES`. The guard refuses a response past it.
+_Avoid_: hard limit, cap.
+
+**Largest size**:
+The most bytes an answer can take, worked out from its schema before the app runs. The gate holds
+it under the default limit. `docs/adr/template/0028`.
+_Avoid_: worst case, maximum size.
+
 **Page**:
 At most `PAGE_MAX` rows of a list, and `next`: the cursor where the page after it starts, or
 `None` on the last page. Every list a store answers is a page. `docs/adr/template/0026`.

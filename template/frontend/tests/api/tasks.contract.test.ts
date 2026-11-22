@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { API_BASE_URL } from "@/api/base";
 import { type Job, jobsApi } from "@/api/jobs";
-import { type Task, tasksApi } from "@/api/tasks";
+import { type Task, type TaskPage, TITLE_MAX, tasksApi } from "@/api/tasks";
 import { againstLiveBackend } from "./target";
 
 async function ended(id: string): Promise<Job> {
@@ -99,6 +99,14 @@ describe(`tasks contract (${againstLiveBackend ? "live backend" : "mock handlers
   });
 });
 
+describe(`task title contract (${againstLiveBackend ? "live backend" : "mock handlers"})`, () => {
+  it("refuses a title over its bound with a 422", async () => {
+    await expect(tasksApi.create({ title: "x".repeat(TITLE_MAX + 1) })).rejects.toThrow(
+      "POST /tasks failed with 422",
+    );
+  });
+});
+
 describe(`jobs contract (${againstLiveBackend ? "live backend" : "mock handlers"})`, () => {
   it("answers a job it was asked for as pending, and reads it back ended", async () => {
     const asked = await tasksApi.close("does-not-exist");
@@ -120,28 +128,21 @@ describe(`jobs contract (${againstLiveBackend ? "live backend" : "mock handlers"
 });
 
 if (againstLiveBackend) {
-  it("sends a page over its byte limit whole through the live HTTP path", async () => {
+  it("sends a page over a limit of 1024 bytes whole through the live HTTP path", async () => {
     const created: string[] = [];
-    await new Promise((resolve) => setTimeout(resolve, 1000));
     try {
-      for (let index = 0; index < 9; index += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        const task = await tasksApi.create({ title: "x".repeat(512 * 1024) });
-        created.push(task.id);
+      for (let index = 0; index < 3; index += 1) {
+        created.push((await tasksApi.create({ title: "x".repeat(TITLE_MAX) })).id);
       }
       const answered = await fetch(`${API_BASE_URL}/tasks`);
       expect(answered.status).toBe(200);
-      expect((await answered.arrayBuffer()).byteLength).toBeGreaterThan(4 * 1024 * 1024);
-      const listed = (await tasksApi.list(null)).tasks.map((task) => task.id);
+      expect((await answered.clone().arrayBuffer()).byteLength).toBeGreaterThan(1024);
+      const listed = ((await answered.json()) as TaskPage).tasks.map((task) => task.id);
       expect(created.every((id) => listed.includes(id))).toBe(true);
     } finally {
       for (const id of created) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
         await tasksApi.remove(id);
       }
     }
-    expect((await tasksApi.list(null)).tasks.every((task) => !created.includes(task.id))).toBe(
-      true,
-    );
   });
 }

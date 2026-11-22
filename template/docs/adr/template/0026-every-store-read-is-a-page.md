@@ -82,7 +82,7 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   project recorded it. `tests/test_list_debt.py` fails on an entry that the file does not hold.
   So no list names a new GET route, a new table, or a route that breaks the bound later. The test
   that reads the list says what to fix.
-- **The mock pages as the backend does.** `src/mocks/store.ts` holds its own `PAGE_MAX`, and
+- **The mock pages as the backend does.** `src/mocks/pages.ts` holds its own `PAGE_MAX`, and
   `devtools/check_template.sh` fails when it differs from `maxItems` in `openapi.json`.
 - **The screen reads one page on its first draw, and the next page on a person's click.** The
   task list is a `useInfiniteQuery`. "Load more" reads the page that `next` names. After a read

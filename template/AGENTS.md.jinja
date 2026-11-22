@@ -196,7 +196,8 @@ fans out to both. Each half works without the other's toolchain.
   reads the rest. Never read a whole list to answer part of it. A count, a sum or a group goes in
   SQL. [adr/template/0026](docs/adr/template/0026-every-store-read-is-a-page.md) says why.
 - Each finite response has a byte limit and a ceiling. A response over its limit is sent and
-  reported once for each route; only a response past the ceiling is refused. A route exception
+  reported once for each route; only a response past the ceiling is refused. Bound every list and
+  every string of an answer in its schema, so the gate works out its largest size. A route exception
   names its reason and stays under the ceiling. A stream declares its own limits.
   [adr/template/0028](docs/adr/template/0028-every-finite-response-has-a-byte-bound.md) defines the contract.
 - Never widen the store's surface to take a tenant or an actor. `Database.store(tenant_id)` is the

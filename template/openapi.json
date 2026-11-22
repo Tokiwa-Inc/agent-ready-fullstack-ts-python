@@ -691,6 +691,7 @@
         "properties": {
           "title": {
             "type": "string",
+            "maxLength": 500,
             "title": "Title"
           }
         },
@@ -725,6 +726,10 @@
           },
           "said": {
             "type": "string",
+            "enum": [
+              "Something went wrong in this service.",
+              "The work stopped before it could finish."
+            ],
             "title": "Said",
             "readOnly": true
           }
@@ -754,10 +759,12 @@
         "properties": {
           "id": {
             "type": "string",
+            "maxLength": 36,
             "title": "Id"
           },
           "kind": {
             "type": "string",
+            "maxLength": 1024,
             "title": "Kind"
           },
           "state": {
@@ -865,10 +872,12 @@
         "properties": {
           "id": {
             "type": "string",
+            "maxLength": 36,
             "title": "Id"
           },
           "title": {
             "type": "string",
+            "maxLength": 500,
             "title": "Title"
           },
           "done": {
@@ -897,7 +906,8 @@
           "next": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 36
               },
               {
                 "type": "null"

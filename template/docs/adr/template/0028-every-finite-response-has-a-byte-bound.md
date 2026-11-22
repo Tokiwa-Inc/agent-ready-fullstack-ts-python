@@ -21,7 +21,7 @@ Only a response the edge or the process cannot carry must be refused.
 ## Decision
 
 `app/response_bound.py` holds each finite response before sending its status or body.
-It counts the body bytes emitted by ASGI. Each response has two bounds: its limit and the deployment ceiling.
+It counts the body bytes emitted by ASGI. Each response is held to two sizes: its limit and the deployment ceiling.
 A response over its limit is sent. The guard writes `response over limit` once for each route in each process, with the limit, the bytes and the reason.
 The guard records each route in `Limits.reported`, so one route that answers too much on every request writes one line.
 Each `request completed` line carries `response_over_limit`, so an alert counts every such response, and sees one route grow.
@@ -82,6 +82,21 @@ Observed bytes mean bytes seen before stopping, not the producer's hypothetical 
 The guard does not log the body. The existing 5xx signal counts the refusal.
 A route must still supply a useful bounded representation after this guard exposes its failure.
 
+Each successful answer also has a largest size before the app runs.
+`tests/models/test_response_bounds.py` reads the schema of each route's `2xx` answer, of each media type, in the OpenAPI document the app builds.
+It works out the largest size that answer can take, and fails when that is over `DEFAULT_BYTES`.
+A list needs `maxItems`, a string needs `maxLength`, a format or an `enum`, and a map needs `maxProperties` and a `maxLength` on its keys.
+A value that is any JSON has no largest size.
+The message names the route and the path in the answer that has no bound.
+So a route that answers a whole document fails in the gate, not in production.
+`UNBOUNDED_ANSWERS` in `tests/integration/filled.py` names each route that does not fit, with the reason.
+The list debt holds it, so it only shrinks. The template's own entries are `GET /reads`, which the ceiling bounds part by part, and the two routes that answer a job, whose outcome is any JSON.
+
+A string in an answer gets its bound from `at_most`, as the types `Id`, `Name` and `Title` do.
+The schema carries the bound, and nothing checks it when the answer is built.
+So a value stored before the bound still reads, and the guard reports an answer over its limit.
+A request model checks its own bounds, so a write over a bound answers `422`.
+
 `tests/responses/` checks finite limits, exceptions, mounted applications, assets, headers and stream declarations.
 It checks complete pages separately from deliberate overflow.
 The telemetry test checks the final span and metric status.
@@ -98,6 +113,8 @@ The normal gate runs these tests in a generated project.
 - Refuse each response over the default limit. A route that answers more than expected then fails in production, where it is a cost and not an error.
 - Logging and continuing at any size leaves the edge in charge of the refusal. The ceiling keeps the refusal in the app.
 - A log line for each response over its limit. One route on a busy path then floods the log.
+- `max_length` on a field of an answer. A value stored before the bound then fails the read, and the gate's bound becomes a refusal in production.
+- The OWASP ruleset of Spectral. It needs a bound on each field and adds no sizes, so a route whose fields each have a bound can still answer more than its limit.
 
 ## Consequences
 

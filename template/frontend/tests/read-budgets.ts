@@ -7,3 +7,5 @@ export const readBudgets: Record<string, ReadBudget> = {
 };
 
 export const streams: readonly RegExp[] = [];
+
+export const pagePaths: Record<string, string> = {};

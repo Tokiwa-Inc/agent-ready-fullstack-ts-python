@@ -1070,9 +1070,13 @@ for method in ('patch', 'delete'):
 assert 'content' in paths['/tasks']['get']['responses']['404'], 'GET /tasks 404 declares no body. A cursor that names no task answers one, and the typed handlers cannot mock a response with no model.'
 import re
 page_max = schemas['TaskPage']['properties']['tasks']['maxItems']
-mocked = re.search(r'^export const PAGE_MAX = (\\d+);$', open('frontend/src/mocks/store.ts').read(), re.M)
-assert mocked, 'frontend/src/mocks/store.ts no longer says export const PAGE_MAX = <n>;, so nothing holds the mock page to the contract'
-assert int(mocked.group(1)) == page_max, f'the mock pages {mocked.group(1)} tasks and the contract {page_max}: set PAGE_MAX in frontend/src/mocks/store.ts to the maxItems of TaskPage.tasks in openapi.json'
+mocked = re.search(r'^export const PAGE_MAX = (\\d+);$', open('frontend/src/mocks/pages.ts').read(), re.M)
+assert mocked, 'frontend/src/mocks/pages.ts no longer says export const PAGE_MAX = <n>;, so nothing holds the mock page to the contract'
+assert int(mocked.group(1)) == page_max, f'the mock pages {mocked.group(1)} tasks and the contract {page_max}: set PAGE_MAX in frontend/src/mocks/pages.ts to the maxItems of TaskPage.tasks in openapi.json'
+title_max = schemas['CreateTaskBody']['properties']['title']['maxLength']
+typed = re.search(r'^export const TITLE_MAX = (\\d+);$', open('frontend/src/api/tasks.ts').read(), re.M)
+assert typed, 'frontend/src/api/tasks.ts no longer says export const TITLE_MAX = <n>;, so nothing holds the title field to the contract'
+assert int(typed.group(1)) == title_max, f'the title field takes {typed.group(1)} characters and the contract {title_max}: set TITLE_MAX in frontend/src/api/tasks.ts to the maxLength of CreateTaskBody.title in openapi.json'
 "
 need_grep '"/tasks"' openapi.json "The proxy strips the /api prefix, so the spec must not carry it."
 need_grep 'rewrite' frontend/vite.config.ts

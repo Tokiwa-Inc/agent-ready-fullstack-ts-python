@@ -20,7 +20,7 @@ async def test_a_full_page_of_large_rows_still_answers_a_complete_page(database:
     store = database.store(SENTINEL_TENANT)
     with acting_as(SENTINEL_PRINCIPAL.actor):
         for _ in range(PAGE_MAX + 1):
-            await store.create(CreateTaskBody(title="界" * 2000))
+            await store.create(CreateTaskBody.model_construct(title="界" * 2000))
     app = await asyncio.to_thread(assembled, *ROUTERS, database=database)
     client = TestClient(app)
 
@@ -36,7 +36,7 @@ async def test_a_full_page_of_large_rows_still_answers_a_complete_page(database:
 async def test_a_refused_read_records_the_status_the_client_received(database: Database) -> None:
     store = database.store(SENTINEL_TENANT)
     with acting_as(SENTINEL_PRINCIPAL.actor):
-        await store.create(CreateTaskBody(title="x" * (CEILING_BYTES + 1)))
+        await store.create(CreateTaskBody.model_construct(title="x" * (CEILING_BYTES + 1)))
     app = await asyncio.to_thread(assembled, *ROUTERS, database=database)
     client = TestClient(app)
 

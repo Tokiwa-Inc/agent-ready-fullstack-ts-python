@@ -13,7 +13,8 @@ than a page until it reads a page. `GROWS_WITH_ROWS` names each GET route whose 
 with its rows, `MORE_THAN_ONE_CONNECTION` each that may hold more than one connection at once,
 and `REPEATS_A_STATEMENT` each that may send one statement more than once in a request.
 `NOT_FILLED_YET` names each tenant table that `filled` does not fill past a page yet, and
-`NOT_READ_YET` each GET route that it answers no path for yet. Each list only shrinks.
+`NOT_READ_YET` each GET route that it answers no path for yet. `UNBOUNDED_ANSWERS` names each route
+whose answer has no largest size yet. Each list only shrinks.
 `tests/test_list_debt.py` fails on an entry that `backend/.list-debt.json` does not hold, and on
 an entry that the file holds and the list no longer names.
 """
@@ -58,6 +59,16 @@ NOT_FILLED_YET: dict[str, str] = {}
 """Each tenant table that `filled` leaves at one page or less, and the reason. The test fails on a
 table that the list names and that `filled` fills past a page, and on a reason that is empty.
 Remove a table when `filled` fills it."""
+
+UNBOUNDED_ANSWERS: dict[str, str] = {
+    "GET /reads": "a group answers its parts as text, and app.reads.answer holds it to the ceiling",
+    "GET /jobs/{id}": "a job's outcome is any JSON its handler returns",
+    "POST /tasks/{id}/close": "it answers the job, whose outcome is any JSON its handler returns",
+}
+"""Each route, as `METHOD /path`, whose successful answer has no largest size in its schema, or one
+over the default limit, and the reason. `tests/models/test_response_bounds.py` fails on a route
+that the list names and whose answer fits, and on a reason that is empty. Remove a route when its
+schema bounds its answer."""
 
 NOT_READ_YET: dict[str, str] = {}
 """Each GET route template that `filled` answers no path for, and the reason. The test reads no
