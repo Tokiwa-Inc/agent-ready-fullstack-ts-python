@@ -182,8 +182,11 @@ export interface components {
              * @enum {string}
              */
             cause: "internal" | "attempts_spent";
-            /** Said */
-            readonly said: string;
+            /**
+             * Said
+             * @enum {string}
+             */
+            readonly said: "Something went wrong in this service." | "The work stopped before it could finish.";
         };
         /** HTTPValidationError */
         HTTPValidationError: {

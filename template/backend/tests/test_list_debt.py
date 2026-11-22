@@ -23,6 +23,7 @@ from tests.integration.filled import (
     NOT_READ_YET,
     OVER_A_PAGE,
     REPEATS_A_STATEMENT,
+    UNBOUNDED_ANSWERS,
 )
 
 LIST_DEBT: Final = ".list-debt.json"
@@ -37,6 +38,7 @@ NAMED: Final[Mapping[str, Collection[str]]] = {
     "REPEATS_A_STATEMENT": REPEATS_A_STATEMENT,
     "NOT_FILLED_YET": NOT_FILLED_YET,
     "NOT_READ_YET": NOT_READ_YET,
+    "UNBOUNDED_ANSWERS": UNBOUNDED_ANSWERS,
 }
 """Each list that names its entries. The list debt holds each as a list of entries."""
 

@@ -6,5 +6,10 @@
   "OVER_A_PAGE": [],
   "REPEATS_A_STATEMENT": [],
   "STILL_FREE_TEXT": [],
-  "STILL_SAYS_A_CAUGHT_ERROR": {}
+  "STILL_SAYS_A_CAUGHT_ERROR": {},
+  "UNBOUNDED_ANSWERS": [
+    "GET /jobs/{id}",
+    "GET /reads",
+    "POST /tasks/{id}/close"
+  ]
 }

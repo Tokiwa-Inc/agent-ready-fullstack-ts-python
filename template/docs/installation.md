@@ -872,6 +872,33 @@ What to expect, because it is not all free:
     part's JSON headers must read the cookie instead. A group counts its parts in UTF-8 bytes.
   [adr/template/0028](adr/template/0028-every-finite-response-has-a-byte-bound.md) says why.
 
+- **From 0.93.0 every successful answer has a largest size, and each first draw holds one row a
+  page.**
+  - `backend/tests/integration/filled.py` is yours, so add `UNBOUNDED_ANSWERS: dict[str, str] = {}`
+    to it. Run `make test`: `tests/models/test_response_bounds.py` names each route whose answer
+    has no largest size, with the path of the part that has no bound. Bound what you can, as
+    `app/models/` does: `Id`, `Name` or `Annotated[str, at_most(n)]` on a string, `max_length` on
+    a list. Name the rest in `UNBOUNDED_ANSWERS`, with a reason: the template names `GET /reads`,
+    `GET /jobs/{id}` and `POST /tasks/{id}/close`. Record them: `tests/test_list_debt.py` prints
+    the file to write.
+  - `app/models/jobs.py` now imports `app.models.shared`. In `tests/models/layers.py`, which is
+    yours, give `jobs` the layer `{"failures", "shared"}`.
+  - `POST /tasks` refuses a title of more than `TITLE_MAX`, 500 characters, with a `422`, and so
+    does the mock.
+  - `readsOf` draws each screen at one row a page. `PAGE_MAX`, `pageRows()` and `pageAtMost()` are
+    in `src/mocks/pages.ts`. In each mock of a list of yours, read the page size from `pageRows()`,
+    not `PAGE_MAX`. `tests/api/pages.test.ts` names a mock that does not.
+  - `tests/read-budgets.ts` is yours, so add `export const pagePaths: Record<string, string> = {};`
+    to it. Give it a path to read for each paged route whose path takes a parameter: the test
+    names each one.
+  - `devtools/contract-test.sh` sets `RESPONSE_MAX_BYTES` to 1024 for its backend, so the live
+    contract suite sends a response over its limit.
+  - In `docs/frontend.md`, take the template's bullet that starts "A list is read a page at a
+    time".
+  [adr/template/0028](adr/template/0028-every-finite-response-has-a-byte-bound.md) and
+  [adr/template/0019](adr/template/0019-the-gate-counts-the-reads-of-each-screen-s-first-draw.md)
+  say why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

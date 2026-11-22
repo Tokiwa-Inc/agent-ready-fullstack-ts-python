@@ -27,6 +27,10 @@ Cause = Annotated[
 """A cause that `app/failing.py` or `app/failures.py` declares. Any other name fails validation."""
 
 
+Said = Annotated[str, WithJsonSchema({"type": "string", "enum": sorted(set(SAID.values()))})]
+"""A sentence that a declared cause says."""
+
+
 class Failure(BaseModel):
     """Why some work failed. It holds no text but the sentence its cause declares."""
 
@@ -36,5 +40,5 @@ class Failure(BaseModel):
 
     @computed_field
     @property
-    def said(self) -> str:
+    def said(self) -> Said:
         return SAID[self.cause]

@@ -31,6 +31,7 @@ BACKEND_PORT="${BACKEND_PORT:-${PORTS%% *}}"
 FRONTEND_PORT="${FRONTEND_PORT:-${PORTS##* }}"
 export BACKEND_PORT FRONTEND_PORT
 export APP_ENV=development
+export RESPONSE_MAX_BYTES=1024
 set -a
 . "$here/devtools/contract-test.env"
 set +a

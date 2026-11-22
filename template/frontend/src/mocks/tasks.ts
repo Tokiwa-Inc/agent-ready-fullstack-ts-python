@@ -1,3 +1,4 @@
+import { TITLE_MAX } from "@/api/tasks";
 import { http } from "@/mocks/http";
 import { jobStore } from "@/mocks/jobs";
 import { taskStore } from "@/mocks/store";
@@ -16,7 +17,11 @@ export const taskHandlers = [
 
   http.post("/tasks", async ({ request, response }) => {
     const body = await request.json();
-    return response(201).json(taskStore.create(body));
+    return [...body.title].length > TITLE_MAX
+      ? response(422).json({
+          detail: [{ loc: ["body", "title"], msg: "too long", type: "string_too_long" }],
+        })
+      : response(201).json(taskStore.create(body));
   }),
 
   http.patch("/tasks/{id}", async ({ params, request, response }) => {

@@ -2,7 +2,8 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { TaskList } from "@/components/task-list";
-import { PAGE_MAX, taskStore } from "@/mocks/store";
+import { PAGE_MAX } from "@/mocks/pages";
+import { taskStore } from "@/mocks/store";
 import { renderWithQuery } from "../../render.tsx";
 
 describe("TaskList", () => {
