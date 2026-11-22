@@ -29,10 +29,17 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   `next`. `next` names where the page after this one starts, and is `None` on the last page.
   `TaskPage.tasks` has `max_length=PAGE_MAX`, so `openapi.json` carries the bound as `maxItems`,
   and a route that answers more fails with a `500`.
-- **The database does the picking.** A page is one `LIMIT` in SQL, on the index that leads with
-  `tenant_id` and ends with `seq`. The store reads `PAGE_MAX + 1` rows, answers `PAGE_MAX`, and
-  knows from the extra row whether a next page exists. No code reads a whole list to answer part
-  of it.
+- **The database does the picking, in rows and in bytes.** `fetch_page` in
+  `app/store/pages.py` runs one `LIMIT` of `PAGE_MAX + 1` rows, on the index that leads with
+  `tenant_id` and ends with `seq`. In the same statement Postgres adds up the bytes of each row,
+  `octet_length(row::text)`. It keeps each row while the running sum stays within `PAGE_BYTES`,
+  1 MiB, and always the first row. A page of wide rows is then shorter. Only the rows that
+  Postgres keeps leave the database: the page and, while it fits, the one row after it. So a page
+  of wide rows cannot fill the process's memory. Postgres still reads and measures `PAGE_MAX + 1`
+  rows. The page is ordered by one column whose values are unique, so the running sum follows the
+  order of the page.
+  `next` reads the rest. No code reads a whole list to answer part of it. The memory substrate
+  counts rows, not bytes.
 - **Tasks are newest first.** A task that a person creates is on the first page, so the screen
   shows it at once, whatever the tenant holds. Audit events stay in the order they were recorded.
 - **A cursor names a row, never a position.** The `after` of a task page is the id of the last
@@ -101,6 +108,10 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   needs a fixture ten times the size.
 - **A `limit` that the client sends.** Nothing in the app needs a smaller page. One fixed bound
   is less code, and is the same on every call.
+- **Count the bytes of a page in Python, after the fetch.** asyncpg builds the whole result before
+  `fetch` returns, so the bytes are already in the process.
+- **Refuse a page over `PAGE_BYTES`.** The page is a correct answer that costs more. A shorter page
+  costs the client one more read, and refuses nothing.
 - **`OFFSET`.** It reads and drops every row before the page, so its cost grows with the page
   number. A row that is removed before the offset moves every later row by one.
 - **`seq` as the cursor.** It discloses the writes of other tenants, as above.

@@ -218,8 +218,10 @@ backend/
 - Every index on a tenant table leads with `tenant_id`, or the policy's predicate cannot be
   satisfied and Postgres scans.
 - **A store read answers one page.** A list takes `after` and answers at most `PAGE_MAX` rows
-  and `next`. The SQL reads `PAGE_MAX + 1` rows on an index that leads with `tenant_id` and ends
-  with the column the list is ordered by, such as `tasks_seq_idx`. A task cursor names a task by
+  and `next`. On Postgres a page also stops at `PAGE_BYTES`, and always holds its first row. Read
+  it with `fetch_page` from `app/store/pages.py`: give it a `SELECT` with no `ORDER BY` and no
+  `LIMIT`, and one column whose values are unique to order by. Its SQL reads `PAGE_MAX + 1` rows on
+  an index that leads with `tenant_id` and ends with that column, such as `tasks_seq_idx`. A task cursor names a task by
   its id, never by `seq`. The audit events, which no route serves, page by `seq`. A task cursor
   that names no task of the tenant answers `None`, and the route answers `404`. An audit cursor
   that names no event raises `NoSuchAuditEvent`. `tests/store_contract.py` holds both substrates

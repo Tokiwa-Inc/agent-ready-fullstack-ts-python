@@ -229,7 +229,8 @@ _Avoid_: worst case, maximum size.
 
 **Page**:
 At most `PAGE_MAX` rows of a list, and `next`: the cursor where the page after it starts, or
-`None` on the last page. Every list a store answers is a page. `docs/adr/template/0026`.
+`None` on the last page. On Postgres a page also stops at `PAGE_BYTES`, and always holds its first
+row, so one wide row can pass it. Every list a store answers is a page. `docs/adr/template/0026`.
 _Avoid_: batch, chunk, slice. A screen is never a page.
 
 **Set read**:
