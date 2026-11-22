@@ -52,12 +52,13 @@ It can name another tenant's data. It changes whenever the engine changes.
   bodies are out of scope: a client names its own failures, as `ClientEvent` does.
 - **A project moves to this rule one field at a time.** `STILL_FREE_TEXT` in `app/failures.py`
   names each `Schema.property` that is free text today. The test passes each one listed. It fails
-  on one not listed, and on one listed that no longer holds free text. So the list only shrinks.
+  on one not listed, and on one listed that no longer holds free text. `backend/.list-debt.json`
+  holds what the list named when the project recorded it, so the list only shrinks.
 - **A refusal never says an error it caught.** `tests/errors/test_errors.py` fails on a refusal
   built inside `except ... as name` from an argument that reads `name`.
   `STILL_SAYS_A_CAUGHT_ERROR` in `app/failures.py` counts such refusals in each module today. The
-  test fails on a module over its count, and on a count above what the module builds. So the
-  count only falls.
+  test fails on a module over its count, and on a count above what the module builds. The list
+  debt holds each count to what it was when the project recorded it, so the count only falls.
 - **A job row that an earlier release wrote reads as a cause.** A release before 0.76.0 stored the
   class of the error in `jobs.failure`. `stored_failure` in `app/store/jobs.py` reads a class name as
   `attempts_spent` for `AttemptsSpent`, and as `internal` for any other. A rolling deploy runs a

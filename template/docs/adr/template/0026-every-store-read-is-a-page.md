@@ -63,20 +63,25 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   the tenant, and names the path of each GET route. The test fails on a table that it leaves at
   one page or less, and on a GET route that it does not name. A second test adds a route that
   reads every task, and asserts that the count finds it.
-- **A route that reads more than a page today is named, with its reason, until it reads a page.**
+- **A route that read more than a page when the project recorded the list stays named, with its
+  reason, until it reads a page.**
   `OVER_A_PAGE` in `tests/integration/filled.py` maps a GET route template to its reason. The
   template ships it empty. The test fails on a route over the bound that the list does not name.
   It also fails on a route that the list names and that reads a page, so an entry leaves the list
   when its route reads a page. It fails on an entry that names no GET route that the test reads,
   and on an empty reason. A named route is still read, and still answers `200`.
-- **A table or a route that the fill does not reach today is named, with its reason, until it
-  does.** `NOT_FILLED_YET` names each tenant table that `filled` leaves at one page or less, and
+- **A table or a route that the fill did not reach when the project recorded the list stays
+  named, with its reason, until the fill reaches it.** `NOT_FILLED_YET` names each tenant table that `filled` leaves at one page or less, and
   `NOT_READ_YET` each GET route that it answers no path for. The test reads no route that
   `NOT_READ_YET` names. It fails on a table or a route that it does not reach and that no list
   names. It fails on a listed table that `filled` fills, on a listed route that `filled` answers a
   path for, on an entry that is no tenant table or no GET route, and on an empty reason. So a
   project of real size takes the test with its lists full, and each entry leaves when the fill
   reaches it.
+- **Each list only shrinks.** `backend/.list-debt.json` holds what each list named when the
+  project recorded it. `tests/test_list_debt.py` fails on an entry that the file does not hold.
+  So no list names a new GET route, a new table, or a route that breaks the bound later. The test
+  that reads the list says what to fix.
 - **The mock pages as the backend does.** `src/mocks/store.ts` holds its own `PAGE_MAX`, and
   `devtools/check_template.sh` fails when it differs from `maxItems` in `openapi.json`.
 - **The screen reads one page on its first draw, and the next page on a person's click.** The
@@ -126,7 +131,7 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   returns one row. [0032](0032-a-request-s-reads-do-not-grow-with-its-rows.md) counts those.
 - A new tenant table needs rows in `tests/integration/filled.py`, and a new GET route needs a path
   there, or the test fails.
-- A new entry in `OVER_A_PAGE`, `NOT_FILLED_YET` or `NOT_READ_YET` passes the test. A review sees
-  it. A route in `NOT_READ_YET` is held to no bound.
+- A route in `NOT_READ_YET` is held to no bound. Only a hand edit of `backend/.list-debt.json`
+  adds one, and a review sees that edit.
 - A read that needs every row is not a list. A count, a sum or a group belongs in SQL. A value
   that only all the rows give is derived once per version of its rows, outside the request.

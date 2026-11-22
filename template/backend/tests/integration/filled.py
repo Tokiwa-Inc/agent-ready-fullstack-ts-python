@@ -14,6 +14,8 @@ with its rows, `MORE_THAN_ONE_CONNECTION` each that may hold more than one conne
 and `REPEATS_A_STATEMENT` each that may send one statement more than once in a request.
 `NOT_FILLED_YET` names each tenant table that `filled` does not fill past a page yet, and
 `NOT_READ_YET` each GET route that it answers no path for yet. Each list only shrinks.
+`tests/test_list_debt.py` fails on an entry that `backend/.list-debt.json` does not hold, and on
+an entry that the file holds and the list no longer names.
 """
 
 from app.audit_events import acting_as

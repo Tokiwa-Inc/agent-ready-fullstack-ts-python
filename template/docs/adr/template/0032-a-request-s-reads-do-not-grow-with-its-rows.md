@@ -83,12 +83,13 @@ page could hold every connection of a process.
   when a route makes more statements or takes more connections past a page than at one row. It
   fails when a request holds more than one connection at once. The count is at the connection, as
   in 0026, so a new store method cannot escape it.
-- **A route that does not meet this today is named, with its reason, until it does.**
+- **A route that broke this rule when the project recorded the list stays named, with its reason,
+  until it meets the rule.**
   `GROWS_WITH_ROWS` and `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py` each map a GET
   route template to its reason. The template ships both empty. Each has the rules of
   `OVER_A_PAGE`: the test fails on a route over the rule that the list does not name, on a listed
   route that meets the rule, on an entry that is no GET route that the test reads, and on an
-  empty reason. `filled` is the project's, as
+  empty reason. Each only shrinks, by the list debt of 0026. `filled` is the project's, as
   [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says, and takes
   the number of rows to write.
 - **The test holds itself to its purpose.** A second test adds a route that reads the title of

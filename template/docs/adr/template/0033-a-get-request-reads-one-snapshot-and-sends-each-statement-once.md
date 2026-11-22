@@ -85,8 +85,8 @@ its own.
   reaches the database, without `SET_TENANT_AND_ACTING` and `SET_ACTING`, and the code that sent
   it. It fails on a route that sends one text more than once, at one row or past a page, and names
   the route, the text and each sender. `REPEATS_A_STATEMENT` in `tests/integration/filled.py`
-  names each route that does so today, with its reason, by the rules of `GROWS_WITH_ROWS`. The
-  template ships it empty.
+  names each route that did so when the project recorded it, with its reason, by the rules of
+  `GROWS_WITH_ROWS`. The template ships it empty.
 - **The test holds itself to its purpose.** A route that reads the first page twice sends what a
   route that reads it once sends. A route that reads each item alone, and one that reads each at
   once, repeat a statement. Only a route that writes while it reads holds two connections at once.
