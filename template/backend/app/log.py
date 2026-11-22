@@ -29,6 +29,7 @@ from opentelemetry import trace
 from starlette.routing import Match
 from structlog.typing import EventDict, Processor, WrappedLogger
 
+from app import response_limits
 from app.deployment import ACKNOWLEDGED_ENV
 from app.identity.shared import Principal
 from app.models import ClientEvent
@@ -42,6 +43,10 @@ TENANT_ID: Final = "tenant_id"
 
 ACTOR_ISSUER: Final = "actor.issuer"
 ACTOR_SUBJECT: Final = "actor.subject"
+
+OVER_LIMIT: Final = "response_over_limit"
+"""The field that says whether a request's response was over its limit and was sent, on every
+`request completed` line. `docs/adr/template/0028`."""
 
 TEMPLATE_FIELDS: Final = (TENANT_ID, ACTOR_ISSUER, ACTOR_SUBJECT)
 """The fields `name_principal` names on `request completed`, before the project's own. They
@@ -256,11 +261,18 @@ def request_cancelled(method: str, route: str | None, duration_ms: float) -> Non
 
 
 def request_completed(
-    method: str, route: str | None, status: int, duration_ms: float, named: Mapping[str, str]
+    method: str,
+    route: str | None,
+    status: int,
+    duration_ms: float,
+    named: Mapping[str, str],
+    over_limit: bool,
 ) -> None:
     """One request, by the route that answered it -- never by its path, which carries values.
     Every field of `request_line_fields` is on it, `None` when the request did not name it: no
-    principal on a public route, or when the identity seam refused the request."""
+    principal on a public route, or when the identity seam refused the request. `over_limit` says
+    whether its response was over its limit and was sent: `False` when the request did not reach
+    the response guard."""
     _LOG.info(
         "request completed",
         **{
@@ -268,6 +280,7 @@ def request_completed(
             "http.route": route,
             "http.response.status_code": status,
             "duration_ms": duration_ms,
+            OVER_LIMIT: over_limit,
         },
         **{field: named.get(field) for field in request_line_fields()},
     )
@@ -478,7 +491,9 @@ async def _completed(
         if cancelling():
             request_cancelled(request.method, route, _since(started))
         else:
-            request_completed(request.method, route, status, _since(started), named)
+            declared = request.scope.get(response_limits.STATE)
+            over = isinstance(declared, response_limits.Declaration) and declared.over_limit
+            request_completed(request.method, route, status, _since(started), named, over)
 
 
 def _since(started: float) -> float:
@@ -491,8 +506,15 @@ def cancelling() -> bool:
     return task is not None and task.cancelling() > 0
 
 
+def response_over_limit(*, route: str | None, limit: int, observed: int, reason: str) -> None:
+    """A finite response of `route` was over its limit, and was sent. Written once for each route in
+    each process, so a route that answers too much on every request writes one line."""
+    _LOG.warning("response over limit", route=route, limit=limit, observed=observed, reason=reason)
+
+
 def response_too_large(*, route: str | None, limit: int, observed: int, reason: str) -> None:
-    """A finite response was refused before its bytes left the process."""
+    """A finite response passed the deployment ceiling, and was refused before its bytes left the
+    process."""
     _LOG.error(
         "response too large",
         route=route,

@@ -9,13 +9,14 @@ from starlette.types import Message, Receive, Scope, Send
 
 from app import response_bound, response_limits
 from app.store import Database
+from tests.conftest import Logged
 from tests.responses.doubles import Chunked
 from tests.routed import assembled
 
 
 def test_a_producer_that_swallows_overflow_still_gets_a_refusal(database: Database) -> None:
     async def swallows(scope: Scope, receive: Receive, send: Send) -> None:
-        producer = Chunked([b"x" * (response_limits.DEFAULT_BYTES + 1)])
+        producer = Chunked([b"x" * (response_limits.CEILING_BYTES + 1)])
         with pytest.raises(BaseException, match="Response exceeds"):
             await producer(scope, receive, send)
 
@@ -59,7 +60,7 @@ def test_a_finite_response_that_returns_without_finishing_fails(database: Databa
 
 async def test_file_extensions_fall_back_to_counted_body_messages(tmp_path: Path) -> None:
     path = tmp_path / "file.txt"
-    path.write_bytes(b"x" * 1025)
+    path.write_bytes(b"x" * 2049)
     app = response_bound.BoundsResponses(
         FileResponse(path), limits=response_limits.Limits(1024, 2048)
     )
@@ -85,7 +86,9 @@ async def test_file_extensions_fall_back_to_counted_body_messages(tmp_path: Path
     assert [message["type"] for message in sent] == ["http.response.start", "http.response.body"]
 
 
-def test_a_route_can_narrow_the_default(database: Database) -> None:
+def test_a_route_can_narrow_the_limit_it_is_reported_over(
+    database: Database, logged: Logged
+) -> None:
     router = APIRouter()
 
     @router.get("/small")
@@ -93,7 +96,16 @@ def test_a_route_can_narrow_the_default(database: Database) -> None:
         response_limits.allow(request, max_bytes=1024, reason="A small representation")
         return Response(b"x" * 1025)
 
-    assert TestClient(assembled(router, database=database)).get("/small").status_code == 500
+    client = TestClient(assembled(router, database=database))
+    logged()
+
+    assert client.get("/small").content == b"x" * 1025
+    [line] = [line for line in logged() if line["message"] == "response over limit"]
+    assert (line["limit"], line["observed"], line["reason"]) == (
+        1024,
+        1025,
+        "A small representation",
+    )
 
 
 async def test_a_disconnected_stream_releases_its_producer_without_a_second_response() -> None:
@@ -135,6 +147,7 @@ def test_a_transformation_outside_a_nested_guard_cannot_bypass_the_host_limit(
     database: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("RESPONSE_MAX_BYTES", "1024")
+    monkeypatch.setenv("RESPONSE_CEILING_BYTES", "1024")
     child = assembled(database=database)
     child.mount("/small", Chunked([b"small"]))
 
@@ -175,6 +188,7 @@ def test_compression_outside_the_guard_does_not_hide_overflow(
     from starlette.middleware.gzip import GZipMiddleware
 
     monkeypatch.setenv("RESPONSE_MAX_BYTES", "1024")
+    monkeypatch.setenv("RESPONSE_CEILING_BYTES", "1024")
     app = assembled(database=database)
     app.mount("/large", Chunked([b"x" * 2048]))
     app.add_middleware(GZipMiddleware, minimum_size=1)
@@ -188,7 +202,7 @@ def test_compression_outside_the_guard_does_not_hide_overflow(
 
 def test_a_runtime_error_handler_cannot_intercept_overflow(database: Database) -> None:
     app = assembled(database=database)
-    app.mount("/large", Chunked([b"x" * (response_limits.DEFAULT_BYTES + 1)]))
+    app.mount("/large", Chunked([b"x" * (response_limits.CEILING_BYTES + 1)]))
 
     async def handles(_request: Request, _error: Exception) -> Response:
         return Response("wrong handler", status_code=418)
@@ -205,7 +219,7 @@ def test_a_task_group_does_not_hide_overflow(database: Database) -> None:
     async def grouped(scope: Scope, receive: Receive, send: Send) -> None:
         async with asyncio.TaskGroup() as group:
             group.create_task(
-                Chunked([b"x" * (response_limits.DEFAULT_BYTES + 1)])(scope, receive, send)
+                Chunked([b"x" * (response_limits.CEILING_BYTES + 1)])(scope, receive, send)
             )
 
     app = assembled(database=database)

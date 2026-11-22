@@ -1,4 +1,5 @@
-"""Hold each finite response until its bytes fit the request's declared limit."""
+"""Hold each finite response until its bytes are counted. Send a response over its declared limit
+and report it once for each route. Refuse a response past the deployment ceiling."""
 
 import asyncio
 from typing import final
@@ -130,7 +131,7 @@ class _Held:
     async def _body(self, message: Message) -> None:
         chunk: bytes = message.get("body", b"")
         self.observed += len(chunk)
-        if self.observed > self.declaration.maximum:
+        if self.observed > self.declaration.limits.ceiling:
             self.overflow = True
             self.body.clear()
             raise _Overflow(self)
@@ -148,9 +149,25 @@ class _Held:
             raise ResponsePolicyError("A response body arrived before its start")
         self.complete = True
         self.deadline.reschedule(None)
+        self._report()
         self._length()
         await self.forward(self.start)
         await self.forward({"type": "http.response.body", "body": body})
+
+    def _report(self) -> None:
+        if self.observed <= self.declaration.maximum:
+            return
+        self.declaration.over_limit = True
+        route = log.route_answering(Request(self.scope)) if "app" in self.scope else None
+        if route in self.declaration.limits.reported:
+            return
+        self.declaration.limits.reported.add(route)
+        log.response_over_limit(
+            route=route,
+            limit=self.declaration.maximum,
+            observed=self.observed,
+            reason=self.declaration.reason,
+        )
 
     def _length(self) -> None:
         if self.start is None:
@@ -183,7 +200,7 @@ class _Held:
         request = Request(self.scope)
         log.response_too_large(
             route=log.route_answering(request) if "app" in self.scope else None,
-            limit=self.declaration.maximum,
+            limit=self.declaration.limits.ceiling,
             observed=self.observed,
             reason=self.declaration.reason,
         )

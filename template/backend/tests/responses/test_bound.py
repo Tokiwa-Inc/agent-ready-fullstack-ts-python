@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import APIRouter, Request, Response
@@ -22,8 +23,8 @@ def _limits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RESPONSE_CEILING_BYTES", "4096")
 
 
-@pytest.mark.parametrize("size,status", [(1023, 200), (1024, 200), (1025, 500)])
-def test_the_default_limit_counts_bytes(
+@pytest.mark.parametrize("size,status", [(4095, 200), (4096, 200), (4097, 500)])
+def test_the_ceiling_counts_bytes(
     database: Database, _limits: None, size: int, status: int
 ) -> None:
     response = TestClient(assembled(finite_router(), database=database)).get(f"/body/{size}")
@@ -37,14 +38,44 @@ def test_the_default_limit_counts_bytes(
         assert len(response.content) < 1024
 
 
-def test_a_route_exception_does_not_change_other_requests(
-    database: Database, _limits: None
+def over_limit(lines: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
+    return [
+        (line["route"], line["limit"], line["observed"])
+        for line in lines
+        if line["message"] == "response over limit"
+    ]
+
+
+def test_a_response_over_its_limit_is_sent_and_reported_once_for_its_route(
+    database: Database, _limits: None, logged: Logged
 ) -> None:
     client = TestClient(assembled(finite_router(), database=database))
+    logged()
+
+    first = client.get("/body/1025")
+    again = client.get("/body/2000")
+    within = client.get("/body/1024")
+    lines = logged()
+
+    assert first.content == b"x" * 1025
+    assert again.content == b"x" * 2000
+    assert within.content == b"x" * 1024
+    assert over_limit(lines) == [("/body/{size}", 1024, 1025)]
+    assert [
+        line["response_over_limit"] for line in lines if line["message"] == "request completed"
+    ] == [True, True, False]
+
+
+def test_a_route_exception_does_not_change_other_requests(
+    database: Database, _limits: None, logged: Logged
+) -> None:
+    client = TestClient(assembled(finite_router(), database=database))
+    logged()
 
     assert client.get("/larger/2048").content == b"y" * 2048
-    assert client.get("/larger/2049").status_code == 500
-    assert client.get("/body/2048").status_code == 500
+    assert client.get("/body/2048").content == b"x" * 2048
+    assert client.get("/larger/2049").content == b"y" * 2049
+    assert over_limit(logged()) == [("/body/{size}", 1024, 2048), ("/larger/{size}", 2048, 2049)]
 
 
 @pytest.mark.parametrize("maximum", [0, 1023, 4097, True, 2048.5])
@@ -77,7 +108,7 @@ def test_bytes_include_multibyte_text(database: Database, _limits: None) -> None
 
     @router.get("/text")
     async def text() -> Response:
-        return Response("界" * 400)
+        return Response("界" * 1400)
 
     assert TestClient(assembled(router, database=database)).get("/text").status_code == 500
 
@@ -86,7 +117,7 @@ def test_bytes_include_multibyte_text(database: Database, _limits: None) -> None
 def test_a_mounted_producer_cannot_bypass_the_limit_with_headers(
     database: Database, _limits: None, declared: bytes | None
 ) -> None:
-    producer = Chunked([b"a" * 700, b"b" * 700, b"never"], declared=declared)
+    producer = Chunked([b"a" * 3000, b"b" * 3000, b"never"], declared=declared)
     app = assembled(database=database)
     app.mount("/mounted", producer)
 
@@ -105,7 +136,7 @@ def test_nested_apps_share_the_outer_policy(database: Database, _limits: None) -
     client = TestClient(parent)
 
     assert client.get("/mounted/larger/2048").content == b"y" * 2048
-    assert client.get("/mounted/body/1025").status_code == 500
+    assert client.get("/mounted/body/4097").status_code == 500
 
 
 def test_one_origin_keeps_the_route_exception_and_bounds_assets(
@@ -123,19 +154,36 @@ def test_one_origin_keeps_the_route_exception_and_bounds_assets(
     assert client.get("/").text == "shell"
 
 
+def test_one_origin_marks_a_response_over_its_limit_on_its_request_line(
+    database: Database, _limits: None, tmp_path: Path, logged: Logged
+) -> None:
+    (tmp_path / "index.html").write_text("shell")
+    client = TestClient(
+        serve.create_server(tmp_path, assembled(finite_router(), database=database))
+    )
+    logged()
+
+    assert client.get("/api/body/2048").content == b"x" * 2048
+    assert [
+        line["response_over_limit"]
+        for line in logged()
+        if line["message"] == "request completed" and line["http.route"] == "/body/{size}"
+    ] == [True]
+
+
 def test_a_refusal_log_names_the_cause_without_the_body(
     database: Database, _limits: None, logged: Logged
 ) -> None:
     app = assembled(finite_router(), database=database)
     logged()
 
-    response = TestClient(app).get("/body/1025")
+    response = TestClient(app).get("/body/4097")
     lines = logged()
     refusal = next(line for line in lines if line["message"] == "response too large")
     completed = next(line for line in lines if line["message"] == "request completed")
 
     assert refusal["refusal"] == "ResponseTooLarge"
-    assert (refusal["route"], refusal["limit"], refusal["observed"]) == ("/body/{size}", 1024, 1025)
+    assert (refusal["route"], refusal["limit"], refusal["observed"]) == ("/body/{size}", 4096, 4097)
     assert completed["http.response.status_code"] == response.status_code == 500
     assert refusal["request_id"] == response.headers["x-request-id"]
 
@@ -160,7 +208,7 @@ def test_only_a_declared_stream_can_exceed_the_total_limit(
 
     assert response.status_code == status
     if declared:
-        assert response.content == b"a" * 700 + b"b" * 700
+        assert response.content == b"a" * 3000 + b"b" * 3000
     else:
         assert response.json() == {"detail": ResponseTooLarge.description}
 
@@ -198,7 +246,7 @@ def test_one_origin_also_bounds_an_api_without_its_own_guard(_limits: None, tmp_
 
     (tmp_path / "index.html").write_text("shell")
     api = FastAPI()
-    api.mount("/raw", Chunked([b"x" * 1025]))
+    api.mount("/raw", Chunked([b"x" * 4097]))
     client = TestClient(serve.create_server(tmp_path, api))
 
     assert client.get("/api/raw/").status_code == 500
@@ -210,7 +258,7 @@ def test_declaring_a_stream_does_not_exempt_a_failure(database: Database, _limit
     @router.get("/stream-error")
     async def stream_error(request: Request) -> Response:
         response_limits.stream(request, reason="An export")
-        return Response(b"x" * 1025, status_code=400)
+        return Response(b"x" * 4097, status_code=400)
 
     response = TestClient(assembled(router, database=database)).get("/stream-error")
 

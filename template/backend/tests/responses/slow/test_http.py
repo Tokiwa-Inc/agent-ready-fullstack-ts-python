@@ -36,7 +36,8 @@ def open_stream(go: asyncio.Event) -> APIRouter:
 async def exercise_http(base: str, go: asyncio.Event) -> None:
     async with httpx.AsyncClient(trust_env=False) as client:
         assert (await client.get(f"{base}/larger/2048")).content == b"y" * 2048
-        assert (await client.get(f"{base}/body/1025")).status_code == 500
+        assert (await client.get(f"{base}/body/1025")).content == b"x" * 1025
+        assert (await client.get(f"{base}/body/2049")).status_code == 500
         async with client.stream("GET", f"{base}/stream") as response:
             chunks = response.aiter_bytes()
             assert await anext(chunks) == b"first"
@@ -52,6 +53,7 @@ async def test_limits_exceptions_and_incremental_delivery_over_http(
     database: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, one_origin: bool
 ) -> None:
     monkeypatch.setenv("RESPONSE_MAX_BYTES", "1024")
+    monkeypatch.setenv("RESPONSE_CEILING_BYTES", "2048")
     monkeypatch.setattr(response_bound, "REQUEST_BUDGET_SECONDS", 1.0)
     go = asyncio.Event()
     api = await asyncio.to_thread(assembled, finite_router(), open_stream(go), database=database)

@@ -76,7 +76,15 @@ nearly every screen read in one group, its largest screen 19 reads in one.
   rate, as alone ([0023](0023-the-server-admits-each-actor-s-requests-within-a-bound.md)).
   `/reads` itself is public, and takes nothing.
 - **The byte bound holds each part, and the group.** Each part has the default bound of
-  [0028](0028-every-finite-response-has-a-byte-bound.md). `/reads` declares the ceiling.
+  [0028](0028-every-finite-response-has-a-byte-bound.md). `/reads` declares the ceiling. It counts
+  each part in the UTF-8 bytes it sends, not in characters, so a group of non-ASCII parts stays
+  under the ceiling, and a part that would pass it leaves as `too large`.
+- **A part's cookie is set by the group, never shown in its JSON.** A part's headers are JSON
+  that the client reads, so a `set-cookie` there would expose an `HttpOnly` cookie. `/reads`
+  takes each `set-cookie` out of each part that answered and sends it as a header of `/reads`, in
+  order. The browser stores it as it would for the part alone, and no script reads it. A part
+  that leaves its group sets nothing; the client sends it again alone. `set-cookie2` stays out
+  of the JSON and goes nowhere: RFC 6265 obsoleted it, and browsers do not apply it.
 - **`src/mocks/` answers `/reads` through its own handlers.** It answers each part with MSW's
   `getResponse`, so a part is not a request that `readsOf` counts. A part whose handler answers a
   network error leaves its group, so that alone it fails with `Unreached`, as against a server.

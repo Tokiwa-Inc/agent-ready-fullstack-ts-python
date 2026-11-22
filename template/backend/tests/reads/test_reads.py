@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, final
 
 import pytest
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.testclient import TestClient
 
 from app import serve
@@ -74,6 +74,30 @@ def widgets_router() -> APIRouter:
 
 
 WIDGETS = widgets_router()
+
+
+def personal_router() -> APIRouter:
+    router = APIRouter(dependencies=[Depends(resolved_principal)])
+
+    @router.get("/accents", openapi_extra=PART)
+    async def accents(count: int) -> dict[str, str]:
+        return {"accents": "é" * count}
+
+    @router.get("/session", openapi_extra=PART)
+    async def session(response: Response) -> dict[str, str]:
+        response.set_cookie("session", "renewed", httponly=True)
+        response.set_cookie("theme", "dark")
+        return {"session": "renewed"}
+
+    @router.get("/locale", openapi_extra=PART)
+    async def locale(response: Response) -> dict[str, str]:
+        response.set_cookie("locale", "en")
+        return {"locale": "en"}
+
+    return router
+
+
+PERSONAL = personal_router()
 
 
 def slow_router(seconds: float, *, wait_outside: bool = False) -> APIRouter:
@@ -306,3 +330,33 @@ async def test_a_group_with_no_part_is_refused(database: Database) -> None:
     response = await asyncio.to_thread(client.get, "/reads")
 
     assert response.status_code == 422
+
+
+async def test_a_part_that_fits_in_characters_but_not_in_bytes_leaves_its_group(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(RESPONSE_MAX_BYTES_ENV, "12288")
+    monkeypatch.setenv(RESPONSE_CEILING_BYTES_ENV, "12288")
+    app = await asyncio.to_thread(assembled, *ROUTERS, PERSONAL, database=database)
+
+    parts = await asyncio.to_thread(
+        parts_of, TestClient(app), "/accents?count=3500", "/accents?count=3500"
+    )
+
+    assert [part["kind"] for part in parts] == ["answered", "left"]
+    assert parts[1]["reason"] == "too large"
+
+
+async def test_each_cookie_a_part_sets_is_on_the_group_and_never_in_its_json(
+    database: Database,
+) -> None:
+    app = await asyncio.to_thread(assembled, *ROUTERS, PERSONAL, database=database)
+
+    response = await asyncio.to_thread(
+        TestClient(app).get, "/reads", params=[("part", "/session"), ("part", "/locale")]
+    )
+
+    cookies = [value.split(";")[0] for value in response.headers.get_list("set-cookie")]
+    assert cookies == ["session=renewed", "theme=dark", "locale=en"]
+    assert all(part["kind"] == "answered" for part in response.json()["parts"])
+    assert all("set-cookie" not in part["headers"] for part in response.json()["parts"])
