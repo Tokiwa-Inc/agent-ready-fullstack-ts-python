@@ -53,6 +53,12 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   the last navigation, focus or reconnect. `tests/query-client.test.tsx` holds this.
   [adr/template/0020](adr/template/0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md)
   says why.
+- **The query cache holds the only copy of server data.** Compute what a screen shows from its
+  queries, in the render. Never copy server data into `useState`, a context or a store. A copy
+  needs code that keeps it in step with the server. When two reads disagree for a moment, that
+  code and the reads can start each other again: a **Cycle**. Show that an action is in progress
+  with `useMutationState` or the mutation's own `isPending`, not with a flag in state. A value
+  the person types is state of its own, and it is not a copy.
 - **A second `useQuery` call of a key shares the read only when it mounts.** A call that turns
   `enabled`, or changes its key, reads again. Give a child the data of the screen's query.
 - **A screen's first draw is one request.** `request` in `src/api/client.ts` holds each GET to a
@@ -185,6 +191,16 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
 - **A `useEffect` does not fetch.** Server state comes from TanStack Query hooks against
   `src/api/client.ts`. Effects are for synchronising with something outside React.
   `pnpm conformance` refuses a `fetch`, an `await` or a `.then` written in an effect.
+- **Some conformance rules run through Biome.** `BIOME_CHECKS` in `devtools/biome-checks.mjs`
+  names them. `biome.json` leaves them off, so `biome ci` does not refuse them, and the
+  conformance debt counts their findings as it counts the others. `conformance.allow` does not
+  apply to them. `react-compiler` sees a setter that an effect calls, a function of the
+  component that calls one, and a function whose name starts with `set`. It does not see a
+  function from a context or a prop that sets state somewhere else. No check sees that copy.
+  `AGENTS.md` forbids it.
+
+  `@biomejs/biome` is held to one version, because a patch release can change what a nursery
+  rule finds.
 - **A component file is named for what it exports**, in kebab-case: `task-list.tsx` exports
   `TaskList`. The file name is how anything finds a component without reading it.
 - **Export a function, not an arrow.** `export function load()`, never

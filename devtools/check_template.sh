@@ -802,7 +802,8 @@ PY
 if (cd frontend && node devtools/comments.mjs src --exclude src/nowhere) >/dev/null 2>&1; then
     fail "comments.mjs accepted an exclude naming a path that is not in the tree. That exclude matches nothing today and exempts whatever lands there tomorrow."
 fi
-if (cd frontend && node devtools/conformance.mjs src --theme-file src/nowhere.css) >/dev/null 2>&1
+if ! (cd frontend && node devtools/conformance.mjs src --theme-file src/nowhere.css) 2>&1 \
+    | grep -q 'conformance.themeFiles names src/nowhere.css, which is not in the tree'
 then
     fail "conformance.mjs accepted a theme file that is not in the tree"
 fi
@@ -1150,222 +1151,6 @@ for family in SIM RET PIE C4 PERF ERA C90 PLR0915 TID251; do
     grep -q "\"$family\"" backend/pyproject.toml || { echo "ruff family $family missing" >&2; exit 1; }
 done
 
-echo "==> assert the conformance checks"
-CONF="$WORK/conformance"
-CONFORMANCE="$OUT/frontend/devtools/conformance.mjs"
-mkdir -p "$CONF/bad" "$CONF/good"
-
-: >"$CONF/theme.css"
-printf '{}\n' >"$CONF/package.json"
-conformance() { (cd "$CONF" && node "$CONFORMANCE" --theme-file "$CONF/theme.css" "$@"); }
-
-cat >"$CONF/bad/bad.tsx" <<'BAD'
-import { useEffect, useState } from "react";
-
-export function Bad() {
-  const [items, setItems] = useState<string[]>([]);
-  useEffect(() => {
-    fetch("/api/items").then(async (response) => setItems(await response.json()));
-  }, []);
-  return (
-    <div className="bg-blue-500 text-white" style={{ fontSize: 13, color: "#ff0000" }}>
-      <p className="text-[13px] leading-[1.7]">{items.length}</p>
-    </div>
-  );
-}
-BAD
-
-cat >"$CONF/bad/commented.tsx" <<'BAD'
-import { useEffect } from "react";
-
-export function Commented({ load }: { load: (rows: string[]) => void }) {
-  useEffect(() => {
-    // an unbalanced ) in a note, which must not end this body early
-    fetch("/api/rows").then(async (response) => load(await response.json()));
-  }, [load]);
-  return null;
-}
-BAD
-
-cat >"$CONF/bad/regex.tsx" <<'BAD'
-import { useEffect, useState } from "react";
-
-const SLASH_OR_STAR = /[/*]/;
-
-export function Regex() {
-  const [items, setItems] = useState<string[]>([]);
-  useEffect(() => {
-    fetch("/api/items").then(async (response) => setItems(await response.json()));
-  }, []);
-  return <p style={{ fontSize: 13 }}>{SLASH_OR_STAR.source}{items.length}</p>;
-}
-BAD
-
-cat >"$CONF/bad/arbitrary.tsx" <<'BAD'
-export function Arbitrary() {
-  return (
-    <>
-      <div className="bg-[#1a1a1a] border-[rgb(10,10,10)]" />
-      <div className="shadow-[0_2px_4px_rgba(0,0,0,0.1)]" />
-      <div className="text-[13px] leading-[1.7] font-[Inter]" />
-      <div className="bg-[rebeccapurple]" style={{ color: "red" }} />
-      <div className="p-[7px] gap-[3px] -mt-[0.35rem]" />
-      <div className="bg-primary/80 text-subtle/60 border-destructive/50" />
-      <div className="bg-primary/[0.31] ring-ring/[.08]" />
-      <div className="border-t-red-500 divide-y-gray-300 ring-offset-blue-200" />
-      <div className="inset-shadow-red-500 drop-shadow-xl/25 inset-ring-primary/50" />
-      <div className="border-t-[rebeccapurple] text-shadow-red-500" />
-    </>
-  );
-}
-BAD
-
-cat >"$CONF/bad/stroke.tsx" <<'BAD'
-import { Trash2 } from "lucide-react";
-
-export function Stroke({ lit }: { lit: boolean }) {
-  return (
-    <>
-      <Trash2 strokeWidth={1.5} />
-      <svg className="stroke-2" />
-      <circle strokeOpacity="0.5" fillOpacity={lit ? 0.4 : 0.25} />
-      <path className="stroke-[.5] stroke-[-1]" />
-    </>
-  );
-}
-BAD
-
-cat >"$CONF/bad/invalidating.tsx" <<'BAD'
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
-
-export function Invalidating({ read }: { read: () => Promise<string[]> }) {
-  const client = useQueryClient();
-  const rows = useQuery({ queryKey: ["rows"], queryFn: read });
-  useEffect(() => {
-    void client.invalidateQueries({ queryKey: ["rows"] });
-  }, [client, rows.dataUpdatedAt]);
-  return <p>{rows.data?.length}</p>;
-}
-BAD
-
-cat >"$CONF/bad/bad.css" <<'BAD'
-.thing {
-  color: #fff;
-  font-family: Inter, sans-serif;
-  background: rgb(10 10 10);
-  stroke-width: 2;
-}
-BAD
-
-cat >"$CONF/good/good.tsx" <<'GOOD'
-import { useEffect } from "react";
-
-const ICON_STROKE = 1.5;
-
-type Props = { onResize: () => void; fontSize: "compact" | "comfortable" };
-type Geometry = { strokeWidth: 1 | 2; strokeOpacity: 0.5 };
-
-export function Good({ onResize, fontSize }: Props) {
-  useEffect(() => {
-    // no fetch( here, whatever this note says
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [onResize]);
-  return (
-    <div className="w-[240px] max-w-[65ch] min-h-[200px] gap-[--spacing(var(--gap))] p-4">
-      <p className="text-muted-foreground bg-card/(--wash) border-t-border text-left text-ellipsis">
-        converted-to-black, then back-to-white, text-on-black, at {fontSize}
-      </p>
-      <svg className="stroke-muted-foreground stroke-[length:var(--icon-stroke)]">
-        <path className="stroke-(length:--icon-stroke)" strokeWidth={ICON_STROKE} />
-      </svg>
-    </div>
-  );
-}
-GOOD
-
-cat >"$CONF/bad/composed.tsx" <<'BAD'
-export function Composed() {
-  return <button className="rounded-lg text-sm">go</button>;
-}
-BAD
-
-cat >"$CONF/bad/named-wrong.tsx" <<'BAD'
-export const load = (id: string): string => id.trim();
-
-export function SomethingElse() {
-  return <p className="p-4">{load("x")}</p>;
-}
-BAD
-
-conformance_output="$(conformance "$CONF/bad" 2>&1 || true)"
-for rule in raw-colour palette-utility named-colour token-alpha arbitrary-spacing \
-            arbitrary-type raw-type-declaration inline-type-declaration raw-stroke \
-            magic-presentation-prop effect-data exported-function-expression \
-            filename-export query-invalidation text-outside-a-role \
-            element-outside-a-primitive surface-outside-a-primitive; do
-    if ! printf '%s\n' "$conformance_output" | grep -q "$rule"; then
-        echo "conformance check $rule did not fire. A rule that stops matching looks exactly like a clean codebase." >&2
-        printf '%s\n' "$conformance_output" >&2
-        exit 1
-    fi
-done
-
-mkdir -p "$CONF/spaced"
-printf '@theme {\n  --spacing: initial;\n}\n' >"$CONF/reset.css"
-cat >"$CONF/spaced/spaced.tsx" <<'SPACED'
-export function Spaced() {
-  return <p className="p-7">spaced</p>;
-}
-SPACED
-(cd "$CONF" && node "$CONFORMANCE" --theme-file "$CONF/reset.css" "$CONF/spaced") 2>&1 | grep -q 'spaced.tsx:2  spacing-off-the-scale  p-7' \
-    || fail "conformance let p-7 through under --spacing: initial. Tailwind generates nothing for that step, and the element gets no padding."
-
-if ! printf '%s\n' "$conformance_output" | grep -q 'commented.tsx:.*effect-data'; then
-    echo "conformance lost an effect body to a comment. bad.tsx trips effect-data with no comment in it, so only commented.tsx shows this." >&2
-    printf '%s\n' "$conformance_output" >&2
-    exit 1
-fi
-
-for expected in 'arbitrary.tsx:4.*raw-colour' 'arbitrary.tsx:5.*raw-colour' \
-                'arbitrary.tsx:6.*arbitrary-type' 'arbitrary.tsx:7.*named-colour' \
-                'arbitrary.tsx:8.*arbitrary-spacing' 'arbitrary.tsx:9.*token-alpha' \
-                'arbitrary.tsx:10.*token-alpha' 'arbitrary.tsx:11.*palette-utility' \
-                'arbitrary.tsx:12.*palette-utility' 'arbitrary.tsx:12.*token-alpha' \
-                'arbitrary.tsx:13.*named-colour' 'arbitrary.tsx:13.*palette-utility' \
-                'stroke.tsx:6.*magic-presentation-prop' 'stroke.tsx:7.*raw-stroke' \
-                'stroke.tsx:8.*magic-presentation-prop' 'stroke.tsx:9.*raw-stroke' \
-                'bad.css:5.*raw-stroke' \
-                'regex.tsx:7.*effect-data' 'regex.tsx:10.*inline-type-declaration' \
-                'invalidating.tsx:8.*query-invalidation'; do
-    if ! printf '%s\n' "$conformance_output" | grep -q "$expected"; then
-        echo "conformance let an arbitrary value through: $expected. The table of rules above stays green while one value passes." >&2
-        printf '%s\n' "$conformance_output" >&2
-        exit 1
-    fi
-done
-
-if ! conformance "$CONF/good" >/dev/null 2>&1; then
-    echo "conformance wrongly flagged legitimate code:" >&2
-    conformance "$CONF/good" >&2 || true
-    exit 1
-fi
-
-printf 'export const brand = "#5865f2";\n' >"$CONF/good/brand.ts"
-if conformance "$CONF/good" >/dev/null 2>&1; then
-    echo "conformance missed a raw colour outside the theme" >&2
-    exit 1
-fi
-if ! conformance "$CONF/good" --allow '#5865f2' >/dev/null 2>&1; then
-    echo "conformance ignored an allowlisted value. Without the allowlist, the only way past a false positive is to delete the check." >&2
-    exit 1
-fi
-
-need_grep 'icon-stroke: 1.5' frontend/src/index.css "A rule that reads a token nobody declared resolves to an empty value."
-need_grep '\.lucide' frontend/src/index.css "A token with no rule to carry it to the icons themes nothing."
-need_grep 'stroke-width: var(--icon-stroke)' frontend/src/index.css
-
 echo "==> assert the supply-chain policy"
 need_grep 'minimumReleaseAge: 10080' frontend/pnpm-workspace.yaml
 need_grep 'dlxCacheMaxAge' frontend/pnpm-workspace.yaml
@@ -1672,6 +1457,237 @@ PY
 
 run "frontend lint" pnpm -C frontend lint:check
 run "vitest" pnpm -C frontend test
+
+echo "==> assert the conformance checks"
+CONF="$WORK/conformance"
+CONFORMANCE="$OUT/frontend/devtools/conformance.mjs"
+mkdir -p "$CONF/bad" "$CONF/good"
+
+: >"$CONF/theme.css"
+printf '{}\n' >"$CONF/package.json"
+conformance() { (cd "$CONF" && PATH="$OUT/frontend/node_modules/.bin:$PATH" node "$CONFORMANCE" --theme-file "$CONF/theme.css" "$@"); }
+
+cat >"$CONF/bad/bad.tsx" <<'BAD'
+import { useEffect, useState } from "react";
+
+export function Bad() {
+  const [items, setItems] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/items").then(async (response) => setItems(await response.json()));
+  }, []);
+  return (
+    <div className="bg-blue-500 text-white" style={{ fontSize: 13, color: "#ff0000" }}>
+      <p className="text-[13px] leading-[1.7]">{items.length}</p>
+    </div>
+  );
+}
+BAD
+
+cat >"$CONF/bad/commented.tsx" <<'BAD'
+import { useEffect } from "react";
+
+export function Commented({ load }: { load: (rows: string[]) => void }) {
+  useEffect(() => {
+    // an unbalanced ) in a note, which must not end this body early
+    fetch("/api/rows").then(async (response) => load(await response.json()));
+  }, [load]);
+  return null;
+}
+BAD
+
+cat >"$CONF/bad/regex.tsx" <<'BAD'
+import { useEffect, useState } from "react";
+
+const SLASH_OR_STAR = /[/*]/;
+
+export function Regex() {
+  const [items, setItems] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/items").then(async (response) => setItems(await response.json()));
+  }, []);
+  return <p style={{ fontSize: 13 }}>{SLASH_OR_STAR.source}{items.length}</p>;
+}
+BAD
+
+cat >"$CONF/bad/arbitrary.tsx" <<'BAD'
+export function Arbitrary() {
+  return (
+    <>
+      <div className="bg-[#1a1a1a] border-[rgb(10,10,10)]" />
+      <div className="shadow-[0_2px_4px_rgba(0,0,0,0.1)]" />
+      <div className="text-[13px] leading-[1.7] font-[Inter]" />
+      <div className="bg-[rebeccapurple]" style={{ color: "red" }} />
+      <div className="p-[7px] gap-[3px] -mt-[0.35rem]" />
+      <div className="bg-primary/80 text-subtle/60 border-destructive/50" />
+      <div className="bg-primary/[0.31] ring-ring/[.08]" />
+      <div className="border-t-red-500 divide-y-gray-300 ring-offset-blue-200" />
+      <div className="inset-shadow-red-500 drop-shadow-xl/25 inset-ring-primary/50" />
+      <div className="border-t-[rebeccapurple] text-shadow-red-500" />
+    </>
+  );
+}
+BAD
+
+cat >"$CONF/bad/stroke.tsx" <<'BAD'
+import { Trash2 } from "lucide-react";
+
+export function Stroke({ lit }: { lit: boolean }) {
+  return (
+    <>
+      <Trash2 strokeWidth={1.5} />
+      <svg className="stroke-2" />
+      <circle strokeOpacity="0.5" fillOpacity={lit ? 0.4 : 0.25} />
+      <path className="stroke-[.5] stroke-[-1]" />
+    </>
+  );
+}
+BAD
+
+cat >"$CONF/bad/invalidating.tsx" <<'BAD'
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+
+export function Invalidating({ read }: { read: () => Promise<string[]> }) {
+  const client = useQueryClient();
+  const rows = useQuery({ queryKey: ["rows"], queryFn: read });
+  useEffect(() => {
+    void client.invalidateQueries({ queryKey: ["rows"] });
+  }, [client, rows.dataUpdatedAt]);
+  return <p>{rows.data?.length}</p>;
+}
+BAD
+
+cat >"$CONF/bad/bad.css" <<'BAD'
+.thing {
+  color: #fff;
+  font-family: Inter, sans-serif;
+  background: rgb(10 10 10);
+  stroke-width: 2;
+}
+BAD
+
+cat >"$CONF/good/good.tsx" <<'GOOD'
+import { useEffect } from "react";
+
+const ICON_STROKE = 1.5;
+
+type Props = { onResize: () => void; fontSize: "compact" | "comfortable" };
+type Geometry = { strokeWidth: 1 | 2; strokeOpacity: 0.5 };
+
+export function Good({ onResize, fontSize }: Props) {
+  useEffect(() => {
+    // no fetch( here, whatever this note says
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [onResize]);
+  return (
+    <div className="w-[240px] max-w-[65ch] min-h-[200px] gap-[--spacing(var(--gap))] p-4">
+      <p className="text-muted-foreground bg-card/(--wash) border-t-border text-left text-ellipsis">
+        converted-to-black, then back-to-white, text-on-black, at {fontSize}
+      </p>
+      <svg className="stroke-muted-foreground stroke-[length:var(--icon-stroke)]">
+        <path className="stroke-(length:--icon-stroke)" strokeWidth={ICON_STROKE} />
+      </svg>
+    </div>
+  );
+}
+GOOD
+
+cat >"$CONF/bad/composed.tsx" <<'BAD'
+export function Composed() {
+  return <button className="rounded-lg text-sm">go</button>;
+}
+BAD
+
+cat >"$CONF/bad/named-wrong.tsx" <<'BAD'
+export const load = (id: string): string => id.trim();
+
+export function SomethingElse() {
+  return <p className="p-4">{load("x")}</p>;
+}
+BAD
+
+cat >"$CONF/bad/copied.tsx" <<'BAD'
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+
+export function Copied({ items }: { items: string[] }) {
+  const [shown, setShown] = useState(0);
+  const { ...read } = useQuery({ queryKey: ["items"], queryFn: () => items });
+  useEffect(() => {
+    setShown(items.length);
+  }, [items]);
+  return <div onClick={() => setShown(shown + 1)}>{String(read.data)}</div>;
+}
+BAD
+
+conformance_output="$(conformance "$CONF/bad" 2>&1 || true)"
+for rule in raw-colour palette-utility named-colour token-alpha arbitrary-spacing \
+            arbitrary-type raw-type-declaration inline-type-declaration raw-stroke \
+            magic-presentation-prop effect-data exported-function-expression \
+            filename-export query-invalidation text-outside-a-role \
+            element-outside-a-primitive surface-outside-a-primitive \
+            react-compiler handler-on-a-non-interactive-element query-result-rest; do
+    if ! printf '%s\n' "$conformance_output" | grep -q "$rule"; then
+        echo "conformance check $rule did not fire. A rule that stops matching looks exactly like a clean codebase." >&2
+        printf '%s\n' "$conformance_output" >&2
+        exit 1
+    fi
+done
+
+mkdir -p "$CONF/spaced"
+printf '@theme {\n  --spacing: initial;\n}\n' >"$CONF/reset.css"
+cat >"$CONF/spaced/spaced.tsx" <<'SPACED'
+export function Spaced() {
+  return <p className="p-7">spaced</p>;
+}
+SPACED
+(cd "$CONF" && PATH="$OUT/frontend/node_modules/.bin:$PATH" node "$CONFORMANCE" --theme-file "$CONF/reset.css" "$CONF/spaced") 2>&1 | grep -q 'spaced.tsx:2  spacing-off-the-scale  p-7' \
+    || fail "conformance let p-7 through under --spacing: initial. Tailwind generates nothing for that step, and the element gets no padding."
+
+if ! printf '%s\n' "$conformance_output" | grep -q 'commented.tsx:.*effect-data'; then
+    echo "conformance lost an effect body to a comment. bad.tsx trips effect-data with no comment in it, so only commented.tsx shows this." >&2
+    printf '%s\n' "$conformance_output" >&2
+    exit 1
+fi
+
+for expected in 'arbitrary.tsx:4.*raw-colour' 'arbitrary.tsx:5.*raw-colour' \
+                'arbitrary.tsx:6.*arbitrary-type' 'arbitrary.tsx:7.*named-colour' \
+                'arbitrary.tsx:8.*arbitrary-spacing' 'arbitrary.tsx:9.*token-alpha' \
+                'arbitrary.tsx:10.*token-alpha' 'arbitrary.tsx:11.*palette-utility' \
+                'arbitrary.tsx:12.*palette-utility' 'arbitrary.tsx:12.*token-alpha' \
+                'arbitrary.tsx:13.*named-colour' 'arbitrary.tsx:13.*palette-utility' \
+                'stroke.tsx:6.*magic-presentation-prop' 'stroke.tsx:7.*raw-stroke' \
+                'stroke.tsx:8.*magic-presentation-prop' 'stroke.tsx:9.*raw-stroke' \
+                'bad.css:5.*raw-stroke' \
+                'regex.tsx:7.*effect-data' 'regex.tsx:10.*inline-type-declaration' \
+                'invalidating.tsx:8.*query-invalidation'; do
+    if ! printf '%s\n' "$conformance_output" | grep -q "$expected"; then
+        echo "conformance let an arbitrary value through: $expected. The table of rules above stays green while one value passes." >&2
+        printf '%s\n' "$conformance_output" >&2
+        exit 1
+    fi
+done
+
+if ! conformance "$CONF/good" >/dev/null 2>&1; then
+    echo "conformance wrongly flagged legitimate code:" >&2
+    conformance "$CONF/good" >&2 || true
+    exit 1
+fi
+
+printf 'export const brand = "#5865f2";\n' >"$CONF/good/brand.ts"
+if conformance "$CONF/good" >/dev/null 2>&1; then
+    echo "conformance missed a raw colour outside the theme" >&2
+    exit 1
+fi
+if ! conformance "$CONF/good" --allow '#5865f2' >/dev/null 2>&1; then
+    echo "conformance ignored an allowlisted value. Without the allowlist, the only way past a false positive is to delete the check." >&2
+    exit 1
+fi
+
+need_grep 'icon-stroke: 1.5' frontend/src/index.css "A rule that reads a token nobody declared resolves to an empty value."
+need_grep '\.lucide' frontend/src/index.css "A token with no rule to carry it to the icons themes nothing."
+need_grep 'stroke-width: var(--icon-stroke)' frontend/src/index.css
 
 echo "==> assert commit selection and full coverage, including nested slow tests"
 python3 "$REPO/devtools/check_test_selection.py"

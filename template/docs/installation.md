@@ -846,6 +846,15 @@ What to expect, because it is not all free:
     and asks" and "The gate runner unsets". In `AGENTS.md`, take the bullet that starts "A
     commit-gate test". In `CONTEXT.md`, take the "Commit gate" entry.
   [adr/template/0014](adr/template/0014-the-gate-runs-once-per-tree-and-one-at-a-time.md) says why.
+- **From 0.91.0 `pnpm conformance` runs three rules through Biome**, and `@biomejs/biome` is
+  held to 2.6.7. The update does not write `frontend/.conformance-debt.json`, so the debt does not
+  name the new rules, and `pnpm conformance` fails on each of their findings. After the update:
+  - Run `pnpm -C frontend install`, and commit `frontend/pnpm-lock.yaml`.
+  - If `frontend/biome.json` still holds `"recommended": true`, run
+    `pnpm -C frontend exec biome migrate --write`. It writes `"preset": "recommended"` in its place.
+  - Fix what you can. Then run `pnpm -C frontend conformance:record` once. It counts the
+    findings of the new rules only, and you commit the file.
+  [docs/frontend.md](frontend.md#conventions) says what each rule sees.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

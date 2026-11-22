@@ -190,7 +190,9 @@ The conformance and drift fixtures run outside the rendered frontend, away from 
 uses its own defaults and the project's `allow` list stays out of a run that proves each rule
 fires. `gate.mjs` `section()` fails when the working directory holds no `package.json`, because a
 gate that falls back to defaults nobody chose can report a tree clean. One default names a theme
-file that exists only in a project, so the fixtures pass `--theme-file` an empty file.
+file that exists only in a project, so the fixtures pass `--theme-file` an empty file. The fixtures
+take `biome` from the rendered frontend's `node_modules/.bin`, because `conformance.mjs` runs
+Biome for some rules. So they run after the install, and `make fast` does not run them.
 
 The comments inside those fixtures are data, not a breach of *Zero comments*. The scanner must
 see through a comment in both directions: `commented.tsx` puts an unbalanced `)` before a

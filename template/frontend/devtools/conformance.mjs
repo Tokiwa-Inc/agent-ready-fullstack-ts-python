@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { BIOME_CHECKS, biomeViolations } from "./biome-checks.mjs";
 import { compositionChecks, SPACING_UTILITY, TYPE_SCALE_STEP } from "./composition.mjs";
 import { reportLoose, reportTightened, settled } from "./debt.mjs";
 import { assertResolves, count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
@@ -539,10 +540,13 @@ function main(argv) {
     skipped: (path) => skipped(path, config),
   });
   if (files.length === 0) fail(`no source files under ${paths.join(", ")}`);
-  const violations = files.flatMap((file) => check(file, config));
-  const rules = [...config.rules, ...config.codeChecks, ...config.compositionChecks].map(
-    (rule) => rule.name,
-  );
+  const violations = [...files.flatMap((file) => check(file, config)), ...biomeViolations(files)];
+  const rules = [
+    ...config.rules,
+    ...config.codeChecks,
+    ...config.compositionChecks,
+    ...BIOME_CHECKS,
+  ].map((rule) => rule.name);
   const outcome = settled(violations, { ...options, scanned: new Set(files), rules });
   if (!reportedClean(outcome, options.path)) return 1;
   const kept = outcome.owed > 0 ? `, ${count(outcome.owed, "finding")} owed in the debt` : "";

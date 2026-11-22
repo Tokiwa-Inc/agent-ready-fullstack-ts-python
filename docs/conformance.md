@@ -17,6 +17,7 @@ fails the build, so the standard holds without anyone remembering it. The aim is
 | **Data fetching** | server state comes from TanStack Query. An effect that fetches is refused; effects that subscribe, listen or touch the DOM are untouched | `conformance.mjs` |
 | **Naming** | a `.tsx` file is named for what it exports, in kebab-case | `conformance.mjs` |
 | **Definitions** | exported functions are declarations, not arrows assigned to a name | `conformance.mjs` |
+| **Render and effects** | a render is pure, an effect does not set state the render can compute, a handler sits on an element a keyboard reaches, and no rest element takes a whole query result | Biome, through `conformance.mjs` |
 | **Types** | strict, plus `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` | `tsc --noEmit` |
 | **Comments** | none | `comments.mjs` |
 
@@ -32,6 +33,19 @@ exempt — a rule that fires on correct Tailwind gets deleted. The opacity rule 
 one, and the figure turns on directory layout rather than code quality: 1.2% to 6.1% of files
 with vendored UI excluded, 4.8% to 8.9% over every file. This template earns the low end because
 `components.json` pins the `ui` alias to the path `conformance.exclude` names.
+
+The Biome rules were measured on a generated project of about 1,900 files before they were
+adopted. `useReactCompiler` reported 81 findings in 55 files: an impure call in a render, a ref
+read in a render, a mutated value, a component made during a render, and an effect that sets
+state. `noNoninteractiveElementInteractions` reported 12, and `noTanstackQueryRestDestructuring`
+1. The three add about 0.6 s of wall time and 1 s of CPU to a lint that takes 0.4 s. Biome's
+type-aware rules were measured and not adopted. They added about 12 s of CPU.
+`noFloatingPromises` and `noMisusedPromises` reported nothing, because Biome does not see the
+promises a library types. `noUnnecessaryConditions` flagged a check that fails loudly when an
+answer does not match its cast. `noLeakedRender` was not adopted either: its findings were
+strings, and an empty string renders nothing. None of these rules sees the copy of server data
+that a context holds and an effect keeps in step. That copy caused the incident they were
+measured for.
 
 ## Backend
 

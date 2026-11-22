@@ -71,6 +71,21 @@ const AFTER_A_REGEX = [
 
 const AFTER_A_REGEX_RULES = ["effect-data", "inline-type-declaration"];
 
+const COPIED = [
+  "import { useQuery } from '@tanstack/react-query';",
+  "import { useEffect, useState } from 'react';",
+  "export function Copied({ items }: { items: string[] }) {",
+  "  const [shown, setShown] = useState(0);",
+  "  const { ...read } = useQuery({ queryKey: ['items'], queryFn: () => items });",
+  "  useEffect(() => {",
+  "    setShown(items.length);",
+  "  }, [items]);",
+  "  return <div onClick={() => setShown(shown + 1)}>{String(read.data)}</div>;",
+  "}",
+];
+
+const BIOME_RULES = ["handler-on-a-non-interactive-element", "query-result-rest", "react-compiler"];
+
 const CLEAN = [
   "import { useEffect } from 'react';",
   "const ICON_STROKE = 1.5;",
@@ -120,6 +135,18 @@ function scan(name: string, lines: string[], rulesModule = NO_PROJECT_RULES, arg
   const rules = reported.map((line) => line.split(/\s{2,}/)[1]);
   return { status, stdout, stderr, rules: [...new Set(rules)].sort() };
 }
+
+describe("the conformance gate on what biome finds", () => {
+  beforeEach(conformance.open);
+
+  afterEach(conformance.close);
+
+  it("fires every rule biome finds on markup that breaks all of them", () => {
+    const { status, rules } = scan("copied.tsx", COPIED);
+    expect(rules).toEqual(BIOME_RULES);
+    expect(status).toBe(1);
+  });
+});
 
 describe("the conformance gate", () => {
   beforeEach(conformance.open);
@@ -184,7 +211,7 @@ describe("the conformance gate", () => {
   });
 
   it("counts exactly the checks this table demonstrates", () => {
-    const demonstrated = new Set([...OFFENDING_RULES, ...STYLESHEET_RULES]);
+    const demonstrated = new Set([...OFFENDING_RULES, ...STYLESHEET_RULES, ...BIOME_RULES]);
     const { stdout } = scan("good.tsx", CLEAN);
     expect(stdout).toContain(`${demonstrated.size} checks`);
   });
@@ -309,7 +336,7 @@ describe("the conformance gate on the project's own rules", () => {
   });
 
   it("counts each project rule among its checks", () => {
-    const demonstrated = new Set([...OFFENDING_RULES, ...STYLESHEET_RULES]);
+    const demonstrated = new Set([...OFFENDING_RULES, ...STYLESHEET_RULES, ...BIOME_RULES]);
     const { stdout } = scan("good.tsx", CLEAN, rulesOf(HAIRLINE, LAZY_CHECK));
     expect(stdout).toContain(`${demonstrated.size + 2} checks`);
   });
