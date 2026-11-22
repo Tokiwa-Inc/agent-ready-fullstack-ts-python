@@ -6,6 +6,7 @@ BUDGET=72
 cd "$(git rev-parse --show-toplevel)"
 
 unset $(git rev-parse --local-env-vars)
+unset DATABASE_URL CONTRACT_BASE_URL BACKEND_PORT FRONTEND_PORT
 
 has_frontend=0
 has_backend=0

@@ -205,8 +205,8 @@ tiers, the migration targets and the per-half variants. `make observe` starts Gr
 Prometheus and prints the `OTEL_*` variables to export.
 
 `BACKEND_PORT`, `FRONTEND_PORT` and `PREVIEW_PORT` move every server, so a second checkout can run
-at the same time. `make test-contract` takes two free ports unless you set them, so the gate does
-not fail while another checkout serves on 8000 or 5173.
+at the same time. `make test-contract` takes two free ports unless you set them. The gate runner
+unsets them, so the gate does not fail while another checkout serves on 8000 or 5173.
 
 Each half also works with its own tools: `pnpm -C frontend test:watch`,
 `pnpm -C frontend add some-package`, `cd backend && uv run pytest -q tests/routes/`,
@@ -234,8 +234,13 @@ below fails only later, as a server that holds its port.
   shortcuts work.
 - **`contract-test.sh` takes both ports in one process.** Two separate requests can return the
   same port, and the gate then fails at random.
-- **`contract-test.sh` serves and asks on `127.0.0.1`, never on `localhost`.** Where
-  `/etc/hosts` gives `localhost` both `::1` and `127.0.0.1`, vite listens on `::1` alone. Node's
-  `fetch` connects to `127.0.0.1`, and every contract test fails with `ECONNREFUSED`. `curl`
-  tries `::1`, so the health probe passes first. A Docker container on its default network has
-  that `/etc/hosts`.
+- **The live contract suite serves and asks on `127.0.0.1`, never on `localhost`.** That
+  covers vite, its proxy to the backend and the suite's requests. Where `/etc/hosts` gives
+  `localhost` both `::1` and `127.0.0.1`, vite listens on `::1` alone. Node's `fetch` connects to
+  `127.0.0.1`, and every contract test fails with `ECONNREFUSED`. The health probe uses `curl`,
+  which tries `::1`, so the probe passes and the suite then fails. A Docker container on its
+  default network has that `/etc/hosts`.
+- **The gate runner unsets `DATABASE_URL`, `CONTRACT_BASE_URL`, `BACKEND_PORT` and
+  `FRONTEND_PORT`.** With `DATABASE_URL` set, the live contract suite runs on that database and
+  deletes its tasks. With `CONTRACT_BASE_URL` or a port set, the suite can run against a
+  `make dev` that is running, and delete its tasks.

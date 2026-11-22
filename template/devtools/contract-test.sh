@@ -90,7 +90,8 @@ fail() {
     >>"$log" 2>&1 &
 backend_pid=$!
 
-(cd "$here/frontend" && own_group pnpm dev:live --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort) >>"$log" 2>&1 &
+(cd "$here/frontend" && own_group pnpm dev:live --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort) \
+    >>"$log" 2>&1 &
 frontend_pid=$!
 
 if [ -n "${DATABASE_URL:-}" ]; then
