@@ -130,6 +130,12 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 - **Record conformance debt only for a rule that is new to it.** An update or a new project rule
   can bring a rule the debt does not name yet. Then run `pnpm conformance:record` once, by name,
   and commit what it writes. Never record a finding your own change made: fix the code.
+- **Nothing raises the list debt.** `backend/.list-debt.json` holds what each list in
+  `app/failures.py` and `tests/integration/filled.py` named when the project recorded the list.
+  A list may name no more. `make test` fails on an entry that the file does not hold. It also
+  fails on an entry that the file holds and the list no longer names. Then remove the entry from
+  the file in the same commit. An update can bring a list that the file does not hold yet. Record
+  that list once: `make test` prints what to write.
 - **So is a startup baseline.** `make lint` fails when the startup count rises past what
   `backend/.startup-baseline.json` allows, and names the packages that grew.
   [deployment.md](deployment.md#a-cold-start) says why the count costs, and how to record a

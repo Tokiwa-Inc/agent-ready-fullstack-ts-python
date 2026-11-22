@@ -135,7 +135,7 @@ def tenants(
     }
     assert short == {}, (
         f"filled with {ROWS} rows left {short} rows in these tables, one page or less. Write as "
-        f"many rows as filled is asked for, or name the table in NOT_FILLED_YET."
+        f"many rows as filled is asked for."
     )
     full = {table: rows for table, rows in one_held.items() if rows >= PAGE_MAX}
     assert full == {}, (
@@ -253,20 +253,17 @@ def test_no_get_route_reads_more_past_a_page_than_at_one_row(
     assert grew == {}, (
         f"Each of these GET routes made more statements or took more connections at {ROWS} rows "
         f"than at one, as (at one, at {ROWS}): {grew}. Read each fact of the items of a page in "
-        f"one set read, through PostgresDatabase.loader in the store, or name the route in "
-        f"GROWS_WITH_ROWS in tests/integration/filled.py, with its reason."
+        f"one set read, through PostgresDatabase.loader in the store."
     )
     assert held == {}, (
         f"Each of these GET routes held more than one connection at once: {held}. Read through "
-        f"PostgresDatabase.loader, or name the route in MORE_THAN_ONE_CONNECTION in "
-        f"tests/integration/filled.py, with its reason."
+        f"PostgresDatabase.loader."
     )
     assert sent_again == {}, (
         f"Each of these GET routes sent a statement to the database more than once in one "
         f"request, as {{route: {{statement: [the code that sent it, each time]}}}}: {sent_again}. "
         f"Read the same thing once, read each item's fact in one set read through "
-        f"PostgresDatabase.loader, or name the route in REPEATS_A_STATEMENT in "
-        f"tests/integration/filled.py, with its reason."
+        f"PostgresDatabase.loader."
     )
     assert grew_in_vain == [], (
         f"GROWS_WITH_ROWS in tests/integration/filled.py names {grew_in_vain}. Each read no more "

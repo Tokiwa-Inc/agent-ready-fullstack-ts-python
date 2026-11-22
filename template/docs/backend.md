@@ -226,9 +226,10 @@ backend/
   to it, and `tests/integration/test_pages_on_postgres.py` holds Postgres to the `LIMIT`.
   `tests/integration/test_routes_read_pages.py` holds each GET route to a page for each read. Give
   each new tenant table rows, and each new GET route a path, in `tests/integration/filled.py`.
-  A route that reads more than a page today goes in `OVER_A_PAGE` there, with its reason, until
-  it reads a page. A table the fill does not reach yet goes in `NOT_FILLED_YET`, and a route it
-  answers no path for in `NOT_READ_YET`, each with its reason. A test that needs the whole list reads it with `tests/pages.py`.
+  The project recorded three lists there. `OVER_A_PAGE` names each route that read more than a
+  page. `NOT_FILLED_YET` names each table that the fill did not reach. `NOT_READ_YET` names each
+  route that the fill answered no path for. Each list only shrinks: `backend/.list-debt.json`
+  holds what each list may name. No list names a new route or a new table. A test that needs the whole list reads it with `tests/pages.py`.
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 - **A request's reads do not grow with its rows.** A Postgres store method for one item asks
   `self._database.loader(self._tenant_id).load(read, key)` for its fact, and its memory twin
@@ -239,9 +240,9 @@ backend/
   read of a turn of the event loop once, in one transaction.
   `tests/integration/test_routes_read_a_fixed_count.py` reads each GET route at one row and past a
   page. It fails on a route that makes more statements or takes more connections past a page,
-  and on one that holds more than one connection at once. A route that does so today goes in
-  `GROWS_WITH_ROWS` or `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py`, with its
-  reason.
+  and on one that holds more than one connection at once. `GROWS_WITH_ROWS` and
+  `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py` name each route that did so when
+  the project recorded them, and only shrink.
   [adr/template/0032](adr/template/0032-a-request-s-reads-do-not-grow-with-its-rows.md) says why.
 - **A GET request reads one snapshot, and sends each statement once.** A Postgres store method
   that only reads takes `self._database.reading(self._tenant_id)`, and one that writes takes
@@ -253,8 +254,8 @@ backend/
   `PostgresDatabase.written` after it. Start no read, and wait for no loader, inside a `reading`
   block: `ReadInsideARead` refuses it.
   `tests/integration/test_routes_read_a_fixed_count.py` fails on a GET route that sends one statement text more than once in a request, and
-  names the code that sent it. A route that does so today goes in `REPEATS_A_STATEMENT` in
-  `tests/integration/filled.py`, with its reason.
+  names the code that sent it. `REPEATS_A_STATEMENT` in `tests/integration/filled.py` names
+  each route that did so when the project recorded it, and only shrinks.
   [adr/template/0033](adr/template/0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md)
   says why.
 - A policy compares `tenant_id` to `current_setting`, as `app/store/ddl.py` writes it. A join or a function that reads

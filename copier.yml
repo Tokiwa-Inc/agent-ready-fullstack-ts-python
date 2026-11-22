@@ -144,6 +144,9 @@ _exclude:
   - "{% if _copier_operation == 'update' %}backend/.complexity-baseline.json{% endif %}"
   - "{% if _copier_operation == 'update' %}backend/.startup-baseline.json{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/.conformance-debt.json{% endif %}"
+  # What each list that only shrinks named when the project recorded it. A new project receives
+  # every list empty. A merged copy would change what the project's lists may name.
+  - "{% if _copier_operation == 'update' %}backend/.list-debt.json{% endif %}"
 
 # Written once and then the project's: an update adds one that is missing and never touches one that
 # exists. Each holds only a project's own list, and the mechanism around it is a module the template

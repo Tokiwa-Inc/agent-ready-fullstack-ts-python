@@ -811,6 +811,18 @@ What to expect, because it is not all free:
   your copy. In `AGENTS.md`, take the bullet that starts "A commit-gate test". In
   `docs/development.md`, take the bullets that start "A commit-gate test" and "A test that
   walks `app/`".
+- **From 0.89.0 each list of what the project has not fixed yet only shrinks.**
+  `backend/.list-debt.json` holds what each list in `backend/app/failures.py` and
+  `backend/tests/integration/filled.py` named when you recorded it. The update does not write
+  the file, and `make test` fails until you do. After the update:
+  - Shrink each list as far as you can first. The first record of a list is its only one: after
+    it, `make test` fails on each entry the record does not hold, a new GET route or table
+    included.
+  - Run `make test`. It prints the file to write, from your lists as they are. Write it, and
+    commit it.
+  - If you moved `filled.py`, `backend/tests/test_list_debt.py` fails to import it. Point its
+    import at yours, as you did in the tests that read each GET route.
+  [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

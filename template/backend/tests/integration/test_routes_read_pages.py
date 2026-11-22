@@ -50,8 +50,8 @@ def gaps(
     left at one page or less, `short`, and with each GET route the test reads, `every_get`. Each
     key says what to do."""
     found = {
-        f"Write more than {PAGE_MAX + 1} rows of the tenant to each table, or name it in "
-        "NOT_FILLED_YET with its reason": set(short) - set(not_filled),
+        f"Write more than {PAGE_MAX + 1} rows of the tenant to each table": set(short)
+        - set(not_filled),
         "Remove each table from NOT_FILLED_YET: it is filled, or is no tenant table": set(
             not_filled
         )
@@ -60,9 +60,7 @@ def gaps(
             not_read
         )
         - every_get,
-        "Answer a path for each route, or name it in NOT_READ_YET with its reason": every_get
-        - set(not_read)
-        - set(paths),
+        "Answer a path for each route": every_get - set(not_read) - set(paths),
         "Remove each route from NOT_READ_YET: filled answers its path": set(paths) & set(not_read),
         "Answer no path for each: openapi.json has no GET route for it": set(paths) - every_get,
     }
@@ -112,8 +110,7 @@ def test_each_get_route_fetches_at_most_a_page_for_each_read(
 
     assert unlisted == {}, (
         f"A read of each of these GET routes fetched more than {PAGE_MAX + 1} rows: {unlisted}. "
-        f"Read a page, or name the route in OVER_A_PAGE in tests/integration/filled.py, with "
-        f"its reason."
+        f"Read a page."
     )
     assert listed_in_vain == [], (
         f"OVER_A_PAGE in tests/integration/filled.py names {listed_in_vain}. No read of these "

@@ -313,6 +313,14 @@ not name yet.
 _Avoid_: budget (a read budget is something else), baseline (a baseline is recorded again),
 allowlist, waiver.
 
+**List debt**:
+The entries that each list in `app/failures.py` and `tests/integration/filled.py` named when the
+project recorded the list. Each such list names what the project has not fixed yet.
+`backend/.list-debt.json` holds the list debt. A list may name no more. Nothing raises the list
+debt. The first record of a list is its only record. The project lowers the list debt when a
+list shrinks.
+_Avoid_: baseline (a baseline is recorded again), allowlist, waiver.
+
 **Primitive**:
 A component of the project's own that owns how a control or a surface looks: a button, a field,
 a card. `conformance.primitives` names the folders of the primitives. A primitive may set its

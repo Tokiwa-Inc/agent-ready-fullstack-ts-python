@@ -1136,6 +1136,7 @@ need backend/tests/devtools/test_comments.py "The table is the only witness that
     || fail "the rendered backend carries a comment"
 need_grep '"--tree"' backend/devtools/lint.py "make lint is what holds the project's scripts to the comment ban."
 need backend/.startup-baseline.json "Without it, make lint fails on every project until somebody records a count"
+need backend/.list-debt.json "Without it, make test fails on every new project until somebody records each list"
 need_grep 'devtools/startup.py' backend/devtools/lint.py "make lint is what holds the backend to the files it loads before it serves."
 python3 backend/devtools/comments.py --tree "$REPO" \
     || fail "a script in this repository or in the template carries a comment. AGENTS.md holds both to the rules the template ships."
@@ -1555,6 +1556,18 @@ fi
 echo "==> backend: lint, test"
 run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
+echo "==> assert the list debt refuses an entry it does not hold"
+FILLED=backend/tests/integration/filled.py
+EMPTY='NOT_READ_YET: dict[str, str] = {}'
+grep -qxF "$EMPTY" "$FILLED" || fail "$FILLED no longer says '$EMPTY', so the list debt mutation tests nothing"
+cp "$FILLED" "$WORK/filled.py"
+sed -i.bak 's|^NOT_READ_YET: dict\[str, str\] = {}$|NOT_READ_YET: dict[str, str] = {"/a-new-route": "not read yet"}|' "$FILLED" && rm -f "$FILLED.bak"
+grep -qF '"/a-new-route"' "$FILLED" || fail "the list debt mutation did not add a route to NOT_READ_YET in $FILLED"
+debt_refused=0
+(cd backend && uv run --no-sync pytest -q -p no:cacheprovider tests/test_list_debt.py) >"$WORK/step.log" 2>&1 || debt_refused=$?
+cp "$WORK/filled.py" "$FILLED"
+[ "$debt_refused" -ne 0 ] || fail "tests/test_list_debt.py passed a NOT_READ_YET that names a route backend/.list-debt.json does not hold"
+grep -qF "'/a-new-route'" "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "tests/test_list_debt.py refused a route that backend/.list-debt.json does not hold, but did not name it"; }
 echo "==> assert the startup gate refuses telemetry imported in every process"
 MAIN=backend/app/main.py
 LAZY='from app import admission, audit_events, log, reads, request_events, response_bound, waits'
