@@ -52,6 +52,10 @@ _NOT_CARRIED: Final = (b"content-length", b"x-request-id")
 
 _ENVELOPE: Final = (b'{"parts":[', b"]}")
 
+_NOT_IN_A_PART: Final = (b"content-length", b"set-cookie", b"set-cookie2")
+"""The headers a part's answer never carries. `answer` sends each `set-cookie` of a part on the
+response of `/reads` instead."""
+
 
 @dataclass(frozen=True)
 class Limits:
@@ -89,13 +93,15 @@ def instrument(app: FastAPI, limits: Limits) -> None:
 class _Outcome:
     answer: AnsweredPart | LeftPart
     route: str | None
+    cookies: tuple[bytes, ...] = ()
 
 
 async def answer(request: Request, paths: Sequence[str]) -> Response:
     """The answer of each part `paths` names, in their order, under the ceiling of the response.
-    A part that raises fails the group. Writes one `part left its group` line for each route and
-    reason of the parts that left. Raises `GroupTooLarge` when the ceiling cannot name each path as
-    a part that left."""
+    A part that raises fails the group. Sends each `set-cookie` of each part that answered as a
+    header of the group, in order. Writes one `part left its group` line for each route and
+    reason of the parts that left. Raises `GroupTooLarge` when the ceiling cannot name each path
+    as a part that left."""
     limits: Limits = request.app.state.read_limits
     ceiling = response_limits.ceiling_of(request)
     if sum(map(len, _ENVELOPE)) + len(paths) * _LEFT_AT_MOST > ceiling:
@@ -118,7 +124,11 @@ async def answer(request: Request, paths: Sequence[str]) -> Response:
         log.part_left(route=route, reason=reason, parts=parts)
     body = b",".join(outcome.answer.model_dump_json().encode() for outcome in outcomes)
     opening, closing = _ENVELOPE
-    return Response(opening + body + closing, media_type="application/json")
+    response = Response(opening + body + closing, media_type="application/json")
+    response.raw_headers.extend(
+        (b"set-cookie", cookie) for outcome in outcomes for cookie in outcome.cookies
+    )
+    return response
 
 
 async def _part(
@@ -139,7 +149,7 @@ async def _part(
             if not bound.expired():
                 raise
             return _Outcome(_left("timed out"), route)
-    return _Outcome(held.answered(), route)
+    return _Outcome(held.answered(), route, tuple(held.cookies))
 
 
 def _scope_of(request: Request, path: str) -> Scope:
@@ -189,14 +199,19 @@ class _Held:
         self._headers: dict[str, str] = {}
         self._body: bytearray = bytearray()
         self._complete: bool = False
+        self.cookies: list[bytes] = []
+        """Each `set-cookie` the part sent, in order."""
 
     async def send(self, message: Message) -> None:
         if message["type"] == "http.response.start":
             self._status = message["status"]
+            self.cookies = [
+                value for name, value in message.get("headers", []) if name.lower() == b"set-cookie"
+            ]
             self._headers = {
                 name.decode("latin-1").lower(): value.decode("latin-1")
                 for name, value in message.get("headers", [])
-                if name.lower() != b"content-length"
+                if name.lower() not in _NOT_IN_A_PART
             }
         elif message["type"] == "http.response.body":
             self._body.extend(message.get("body", b""))
@@ -217,9 +232,12 @@ def _left(reason: LeftBecause) -> LeftPart:
     return LeftPart(kind="left", reason=reason)
 
 
-_LEFT_AT_MOST: Final = max(
-    len(_left(reason).model_dump_json()) + 1 for reason in get_args(LeftBecause)
-)
+def _bytes(answer: AnsweredPart | LeftPart) -> int:
+    """The bytes of `answer` as the group sends it: UTF-8, not characters."""
+    return len(answer.model_dump_json().encode())
+
+
+_LEFT_AT_MOST: Final = max(_bytes(_left(reason)) + 1 for reason in get_args(LeftBecause))
 
 
 def _within(outcomes: Sequence[_Outcome], ceiling: int) -> list[_Outcome]:
@@ -229,10 +247,10 @@ def _within(outcomes: Sequence[_Outcome], ceiling: int) -> list[_Outcome]:
     kept: list[_Outcome] = []
     for index, outcome in enumerate(outcomes):
         later = (len(outcomes) - index - 1) * _LEFT_AT_MOST
-        size = len(outcome.answer.model_dump_json()) + 1
+        size = _bytes(outcome.answer) + 1
         if isinstance(outcome.answer, AnsweredPart) and size + later > room:
             outcome = _Outcome(_left("too large"), outcome.route)
-            size = len(outcome.answer.model_dump_json()) + 1
+            size = _bytes(outcome.answer) + 1
         room -= size
         kept.append(outcome)
     return kept

@@ -856,6 +856,22 @@ What to expect, because it is not all free:
     findings of the new rules only, and you commit the file.
   [docs/frontend.md](frontend.md#conventions) says what each rule sees.
 
+- **From 0.92.0 a response over its limit is sent and reported, and only the ceiling refuses.**
+  A response between `RESPONSE_MAX_BYTES` and `RESPONSE_CEILING_BYTES` used to answer `500`. It
+  is now sent, and `response over limit` names its route once in each process. After the update:
+  - Set `RESPONSE_CEILING_BYTES` below the largest response your edge carries, if you have not.
+    It is now the only size the app refuses.
+  - Add an alert on the count of `response_over_limit: true` on `request completed`, by route.
+  - The guard now holds a finite response up to `RESPONSE_CEILING_BYTES`, not up to
+    `RESPONSE_MAX_BYTES`. Size instance memory for the ceiling times the requests in flight, or
+    lower the ceiling.
+  - A test that expected a `500` over `RESPONSE_MAX_BYTES` now gets the response. Assert the
+    line, or send more than `RESPONSE_CEILING_BYTES`.
+  - A part of `GET /reads` no longer shows `set-cookie` in its JSON headers. `/reads` sends
+    each one as its own header, so the browser stores it. A client that read a cookie from a
+    part's JSON headers must read the cookie instead. A group counts its parts in UTF-8 bytes.
+  [adr/template/0028](adr/template/0028-every-finite-response-has-a-byte-bound.md) says why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

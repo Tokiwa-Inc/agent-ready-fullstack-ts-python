@@ -52,8 +52,8 @@ def stream_router(*, declared: bool) -> APIRouter:
             response_limits.stream(request, reason="The export sends bounded chunks")
 
         async def chunks() -> AsyncIterator[bytes]:
-            yield b"a" * 700
-            yield b"b" * 700
+            yield b"a" * 3000
+            yield b"b" * 3000
 
         return StreamingResponse(chunks())
 

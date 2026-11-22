@@ -435,6 +435,7 @@ def test_a_response_refusal_has_the_final_status_in_the_span_and_metric(
     from app import response_bound
 
     monkeypatch.setenv("RESPONSE_MAX_BYTES", "1024")
+    monkeypatch.setenv("RESPONSE_CEILING_BYTES", "1024")
     monkeypatch.setattr(response_bound, "REQUEST_BUDGET_SECONDS", 0.05)
     app = assembled(finite_router(), unfinished_router(), database=database)
     spans = InMemorySpanExporter()

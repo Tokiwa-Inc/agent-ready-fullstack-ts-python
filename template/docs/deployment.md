@@ -639,9 +639,15 @@ replacement owes.
 ## Response bytes
 
 The default finite response limit is `RESPONSE_MAX_BYTES`, initially 4194304 bytes.
+A response over its limit is sent, and `response over limit` names its route once in each process.
+Each `request completed` line says `response_over_limit`. Alert on the count of `true` by route: it
+names a route that answers more than its page or its schema should allow.
+The guard holds a finite response up to the ceiling. Size memory for the ceiling times the requests
+in flight.
 A route can declare a different limit through `response_limits.allow`.
 The bundled-file route declares the deployment ceiling so large assets need no global default increase.
 `RESPONSE_CEILING_BYTES`, initially 16777216 bytes, caps every finite route exception.
+A response past the ceiling is refused with `ResponseTooLarge`, status `500`.
 Set the ceiling below your edge's response limit. Allow headroom for encoding changes.
 Both settings must be integer byte counts of at least 1024. The default cannot exceed the ceiling.
 Invalid settings stop application construction.

@@ -120,7 +120,7 @@ describe(`jobs contract (${againstLiveBackend ? "live backend" : "mock handlers"
 });
 
 if (againstLiveBackend) {
-  it("refuses an oversized page through the live HTTP path", async () => {
+  it("sends a page over its byte limit whole through the live HTTP path", async () => {
     const created: string[] = [];
     await new Promise((resolve) => setTimeout(resolve, 1000));
     try {
@@ -130,9 +130,10 @@ if (againstLiveBackend) {
         created.push(task.id);
       }
       const answered = await fetch(`${API_BASE_URL}/tasks`);
-      expect(answered.status).toBe(500);
-      expect(await answered.json()).toEqual({ detail: "Response exceeds its byte limit" });
-      await expect(tasksApi.list(null)).rejects.toThrow("Response exceeds its byte limit");
+      expect(answered.status).toBe(200);
+      expect((await answered.arrayBuffer()).byteLength).toBeGreaterThan(4 * 1024 * 1024);
+      const listed = (await tasksApi.list(null)).tasks.map((task) => task.id);
+      expect(created.every((id) => listed.includes(id))).toBe(true);
     } finally {
       for (const id of created) {
         await new Promise((resolve) => setTimeout(resolve, 250));

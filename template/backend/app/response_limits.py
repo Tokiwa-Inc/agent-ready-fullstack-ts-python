@@ -1,6 +1,6 @@
 """The response policy a route declares before it starts its response."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from fastapi import Request
@@ -18,8 +18,15 @@ class ResponsePolicyInvalid(ValueError):
 
 @dataclass(frozen=True)
 class Limits:
+    """`default` is the size a response is expected to stay under. A response over its limit is
+    sent, and reported once for each route. `ceiling` is the size no response passes: the guard
+    refuses a response past it. Set `ceiling` below the largest response the edge in front of the
+    app carries. `docs/adr/template/0028`."""
+
     default: int = DEFAULT_BYTES
     ceiling: int = CEILING_BYTES
+    reported: set[str | None] = field(default_factory=set, compare=False, repr=False)
+    """Each route whose response was over its limit in this process. Only the guard writes it."""
 
     def __post_init__(self) -> None:
         if (
@@ -39,6 +46,8 @@ class Declaration:
     reason: str = "default"
     streaming: bool = False
     started: bool = False
+    over_limit: bool = False
+    """Whether the response was over `maximum`, and was sent."""
 
 
 def declare(scope: Scope, limits: Limits) -> Declaration:
