@@ -57,7 +57,7 @@ function measurementConfig() {
       linter: {
         enabled: true,
         rules: {
-          recommended: false,
+          preset: "none",
           complexity: {
             noExcessiveCognitiveComplexity: {
               level: "error",

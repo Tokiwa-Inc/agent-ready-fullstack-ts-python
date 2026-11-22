@@ -113,6 +113,10 @@ fans out to both. Each half works without the other's toolchain.
 - Never fetch in a `useEffect`, and never through a function an effect calls. Server state comes
   from TanStack Query hooks against `src/api/client.ts`. `pnpm conformance` sees only a `fetch`,
   an `await` or a `.then` written in the effect itself.
+- The query cache holds the only copy of server data. Compute what a screen shows from its
+  queries. Never copy server data into `useState`, a context or a store, and never keep it in step
+  with effects. A check sees only a `useState` copy that an effect of the same component sets.
+  [docs/frontend.md](docs/frontend.md#reading-server-state) says why.
 - A screen's first draw is one request. Sections the person opens later read their own.
   `request` in `src/api/client.ts` sends the reads that start in one task as one group, when each
   route declares `PART`. A read that waits for another read's answer is a second request: start

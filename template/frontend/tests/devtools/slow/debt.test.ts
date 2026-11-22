@@ -140,3 +140,36 @@ describe("the conformance debt on a rule it does not name yet", () => {
     expect(status).toBe(1);
   });
 });
+
+const BIOME_RULES = ["handler-on-a-non-interactive-element", "query-result-rest", "react-compiler"];
+
+const COPYING = [
+  "import { useEffect, useState } from 'react';",
+  "export function Swatch({ items }: { items: string[] }) {",
+  "  const [shown, setShown] = useState(0);",
+  "  useEffect(() => {",
+  "    setShown(items.length);",
+  "  }, [items]);",
+  "  return <p className='border-border'>{shown}</p>;",
+  "}",
+];
+
+describe("the conformance debt on a rule biome finds", () => {
+  beforeEach(conformance.open);
+
+  afterEach(conformance.close);
+
+  it("asks for a record after an update, then lets the file keep what it recorded", () => {
+    run(CLEAN, ["--record"]);
+    const before = debt().rules.filter((rule: string) => !BIOME_RULES.includes(rule));
+    writeFileSync(debtFile(), `${JSON.stringify({ rules: before, files: {} })}\n`);
+    const asked = run(COPYING);
+    expect(asked.stderr).toContain("does not name yet");
+    expect(asked.status).toBe(1);
+    const recorded = run(COPYING, ["--record"]);
+    expect(debt().files).toEqual({ [recorded.path]: { "react-compiler": 2 } });
+    const checked = run(COPYING);
+    expect(checked.stdout).toContain("2 findings owed in the debt");
+    expect(checked.status).toBe(0);
+  });
+});
