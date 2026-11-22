@@ -44,13 +44,13 @@ its own.
   Postgres, in every request and in every test on Postgres. Inside `app.store.jobs.fenced` it is
   not READ ONLY, because Postgres refuses the `FOR KEY SHARE` that holds the claim in a READ ONLY
   transaction.
-- **In a GET or HEAD request, `reading` lends the snapshot of the tenant.**
-  `app/store/snapshots.py` opens it at the first read of the tenant in the request: one
-  transaction, READ ONLY and REPEATABLE READ, on one connection. Each read of one snapshot sees
-  the same data.
+- **In a GET or HEAD request, `reading` lends one snapshot: of the first tenant the request
+  reads.** `app/store/snapshots.py` opens it at that first read: one transaction, READ ONLY and
+  REPEATABLE READ, on one connection. Each read of the snapshot sees the same data. A read of
+  another tenant runs alone.
 - **Each read of a snapshot runs on its one connection, one at a time.** A read waits until the
   read before it ends. The items of a page in one `asyncio.TaskGroup` share the connection, so
-  the request holds one connection for its reads.
+  the reads of the snapshot hold one connection.
 - **A snapshot keeps each answer.** `Kept` answers a `fetch`, `fetchrow` or `fetchval` that it
   already answered: the same method, statement text and arguments, each argument with its type.
   A list, tuple, set or dict is an argument by what it holds. An argument that cannot be kept,
@@ -58,7 +58,7 @@ its own.
   escape it. A statement that calls a function whose answer changes in a transaction, as
   `SENT_EACH_TIME` names (`clock_timestamp()`, `random()`, an advisory lock), goes to the
   database each time.
-- **A snapshot ends before the response starts.** `SnapshotsPerRequest` ends each snapshot of the
+- **A snapshot ends before the response starts.** `SnapshotsPerRequest` ends the snapshot of the
   request at `http.response.start`, and when the request ends. The request event of
   [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) then takes
   the connection after it. A read after the end runs alone.
@@ -77,9 +77,9 @@ its own.
   the request. A run of other shared work can be joined by another request, and can outlive this
   one. `waits.in_shared_work` and `snapshots.for_a_turn` tell them apart. The end of a snapshot
   waits for the read in flight, so no read uses the connection after it goes back to the pool.
-- **A read, or a wait for a loader turn, inside a read raises `ReadInsideARead`.** The first read
-  holds the connection until it ends, so the second would wait for ever. A task that a read
-  starts is refused too.
+- **A read of the snapshot, or a wait for a loader turn, inside a read raises `ReadInsideARead`.**
+  The first read holds the connection until it ends, so the second would wait for ever. A task
+  that a read starts is refused too.
 - **A GET route sends each statement text once in a request, on Postgres.**
   `tests/integration/test_routes_read_a_fixed_count.py` records the text of each statement that
   reaches the database, without `SET_TENANT_AND_ACTING` and `SET_ACTING`, and the code that sent
@@ -89,13 +89,19 @@ its own.
   `GROWS_WITH_ROWS`. The template ships it empty.
 - **The test holds itself to its purpose.** A route that reads the first page twice sends what a
   route that reads it once sends. A route that reads each item alone, and one that reads each at
-  once, repeat a statement. Only a route that writes while it reads holds two connections at once.
+  once, repeat a statement. Only a route that writes while it reads, or reads a second tenant,
+  holds two connections at once.
 
 ## Considered options
 
 - **A snapshot for every request, a write included.** A write must see the writes that it made,
   and a POST does not read the same thing twice. Writes keep one unit for each store call. 0017
   records each unit, and 0022 counts each.
+- **A snapshot for each tenant that the request reads.** Each snapshot holds its connection until
+  the response starts. So a request holds one connection for each tenant it reads. A request that
+  reads more tenants than the pool lends waits on itself until `Timeouts.acquire`, and answers
+  `503`. A route that reads one row of each tenant answers `503` on each request once the tenants
+  outnumber the connections that the pool lends.
 - **Keep each answer for each store method and its arguments.** It also saves the work of Python
   on each repeated call. Each store method must then say how its arguments key it, and a new
   method escapes the keep until it does. The keep at the connection saves the round trips, which
@@ -145,5 +151,12 @@ its own.
   write through `reading`, or a read inside a read.
 - A project adds `REPEATS_A_STATEMENT` to `filled` when it updates. The update does not write
   `tests/integration/filled.py`.
+- A read of a second tenant in a GET request runs alone, and keeps nothing. It takes a
+  connection of its own while the snapshot holds one, so a GET request that reads two tenants
+  needs two connections. Reads of other tenants at once take one connection each.
+- A read of a second tenant inside a read of the snapshot is not refused. It cannot wait for
+  ever, because it does not wait for the connection of the snapshot.
+- In an `asyncio.TaskGroup` whose items read different tenants, the item that reads first picks
+  the tenant of the snapshot.
 - Each part of `GET /reads` is a request of its own, so it has a snapshot of its own. Two parts
   of one group may see different data.

@@ -2,17 +2,21 @@
 committed after it opened, except one the request made through `scoped`.
 `docs/adr/template/0033`."""
 
+from dataclasses import replace
 from typing import Any, Final
 
 import asyncpg
 import pytest
 
 from app.audit_events import acting_as
+from app.jobs import kinds
 from app.models import CreateTaskBody
 from app.store import Database
 from app.store.acting import SET_TENANT_AND_ACTING, acting
+from app.store.pg import PostgresDatabase
 from app.store.snapshots import snapshotted
-from tests.integration.conftest import THE_SUITE
+from app.store.timeouts import Timeouts
+from tests.integration.conftest import ONE_PROCESS, THE_SUITE, Provisioned
 
 TENANT: Final = "acme"
 
@@ -95,3 +99,20 @@ async def test_a_write_on_a_connection_of_its_own_is_seen_after_written(database
         seen = await counted(database)
 
     assert (before, unseen, seen) == (0, 0, 1)
+
+
+async def test_a_request_reads_more_tenants_than_its_pool_holds(provisioned: Provisioned) -> None:
+    database = PostgresDatabase(
+        dsn=provisioned.app_dsn,
+        schema=provisioned.schema,
+        draws=replace(ONE_PROCESS, pool=2),
+        kinds=kinds,
+        timeouts=Timeouts(acquire=1.0),
+    )
+    try:
+        async with snapshotted():
+            for tenant in ("acme", "beta", "gamma", "beta", "acme"):
+                async with database.reading(tenant) as conn:
+                    assert await conn.fetchval(COUNT) == 0
+    finally:
+        await database.close()

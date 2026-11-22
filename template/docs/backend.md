@@ -249,12 +249,13 @@ backend/
 - **A GET request reads one snapshot, and sends each statement once.** A Postgres store method
   that only reads takes `self._database.reading(self._tenant_id)`, and one that writes takes
   `scoped`. `reading` is READ ONLY, so a write through it fails. In a GET request, every read of
-  the tenant runs on the request's snapshot, one at a time, and a repeated statement with the
-  same arguments answers from what the snapshot kept. Change no value that a read answers. A
+  the tenant that the first read names runs on the request's snapshot, one at a time. A
+  repeated statement with the same arguments answers from what the snapshot kept. A read of
+  another tenant runs alone, on a connection of its own. Change no value that a read answers. A
   write in a GET request takes a second connection, and the next read sees it. Take `scoped`
   only to write: it ends the snapshot. A write on `connection()` calls
-  `PostgresDatabase.written` after it. Start no read, and wait for no loader, inside a `reading`
-  block: `ReadInsideARead` refuses it.
+  `PostgresDatabase.written` after it. Start no read of the snapshot, and wait for no loader,
+  inside a `reading` block: `ReadInsideARead` refuses it.
   `tests/integration/test_routes_read_a_fixed_count.py` fails on a GET route that sends one statement text more than once in a request, and
   names the code that sent it. `REPEATS_A_STATEMENT` in `tests/integration/filled.py` names
   each route that did so when the project recorded it, and only shrinks.

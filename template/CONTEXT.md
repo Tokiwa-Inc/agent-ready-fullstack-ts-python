@@ -245,10 +245,11 @@ read of the turn once, one after another, on one connection. It keeps nothing pa
 _Avoid_: DataLoader, batcher, identity map, cache.
 
 **Snapshot**:
-A transaction, READ ONLY and REPEATABLE READ, on one connection, that the reads of a tenant in a
-GET request run in. It keeps each answer, so a statement with the same arguments reaches the
-database once in it. It ends before the response starts, when the request writes to the tenant,
-and when a read in it fails in the database. The next read opens a new one.
+A transaction, READ ONLY and REPEATABLE READ, on one connection. A GET request has one, of the
+tenant that its first read names. A read of another tenant runs alone. The snapshot keeps each
+answer, so a statement with the same arguments reaches the database once in it. It ends before
+the response starts, when the request writes to its tenant, and when a read in it fails in the
+database. The next read of its tenant opens a new one.
 `PostgresDatabase.reading` lends it. `docs/adr/template/0033`.
 _Avoid_: cache, identity map, read transaction, session.
 

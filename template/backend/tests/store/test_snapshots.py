@@ -353,22 +353,18 @@ async def test_a_turn_of_a_loader_reads_on_the_snapshot_and_other_shared_work_re
     assert alone.sent == [("a", ())]
 
 
-async def test_each_snapshot_ends_when_another_fails_to_end() -> None:
-    failing, units = Units(), Units()
+async def test_a_scope_holds_the_snapshot_of_the_first_tenant_it_reads_and_reads_others_alone() -> (
+    None
+):
+    units, alone = Units(), Units()
+    async with snapshotted():
+        for whose in ("a", "b", "c", "b", "a"):
+            async with reading(whose, units.unit, alone.unit, (Unanswerable,)) as conn:
+                _ = await conn.fetch("x")
 
-    @asynccontextmanager
-    async def fails_to_end() -> AsyncGenerator[Units]:
-        async with failing.unit() as conn:
-            yield conn
-        raise Unanswerable("the end")
-
-    async with snapshotted() as scope:
-        async with reading("first", fails_to_end, Units().unit, ()) as conn:
-            _ = await conn.fetch("a")
-        _ = await fetched(units, "a")
-        with pytest.raises(Unanswerable, match="the end"):
-            await scope.end()
-        assert units.ended == ["committed"]
+        assert (units.opened, units.most_open) == (1, 1)
+        assert (alone.opened, alone.most_open, alone.open) == (3, 1, 0)
+    assert units.sent == [("x", ())]
 
 
 class EndsAround:
@@ -436,3 +432,13 @@ async def test_a_task_that_a_read_started_and_that_writes_after_the_read_ends_th
         _ = await fetched(units, "a")
 
     assert units.opened == 2
+
+
+async def test_a_read_of_another_tenant_inside_a_read_of_the_snapshot_reads_alone() -> None:
+    units, alone = Units(), Units()
+    async with snapshotted(), reading("a", units.unit, alone.unit, (Unanswerable,)) as outer:
+        async with reading("b", units.unit, alone.unit, (Unanswerable,)) as inner:
+            assert await inner.fetch("x") == ["x"]
+        assert await outer.fetch("y") == ["y"]
+
+    assert (units.opened, alone.opened) == (1, 1)
