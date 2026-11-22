@@ -34,6 +34,7 @@ from app.models.reads import (
 from app.models.shared import (
     ID_MAX as ID_MAX,
     NAME_MAX as NAME_MAX,
+    PAGE_BYTES as PAGE_BYTES,
     PAGE_MAX as PAGE_MAX,
     ErrorBody as ErrorBody,
     Id as Id,

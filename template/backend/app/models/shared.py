@@ -7,6 +7,10 @@ from pydantic import BaseModel, Field
 PAGE_MAX: Final = 100
 """The most rows one page of a list holds. `docs/adr/template/0026`."""
 
+PAGE_BYTES: Final = 1024 * 1024
+"""The most bytes one page of a list holds, as Postgres measures its rows. A page always holds its
+first row. `docs/adr/template/0026`."""
+
 ID_MAX: Final = 36
 """The most characters an id holds: a uuid as text."""
 
