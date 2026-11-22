@@ -11,10 +11,10 @@ the door.
 
 import ast
 from collections.abc import Callable
-from pathlib import Path
 from typing import NamedTuple
 
-APP = Path(__file__).resolve().parents[2] / "app"
+from tests.source import APP, modules
+
 DEPS_MODULE = "deps.py"
 JOBS_MODULE = "jobs.py"
 SCOPING_FUNCTIONS = frozenset({(DEPS_MODULE, "get_store"), (JOBS_MODULE, "kinds")})
@@ -44,12 +44,11 @@ def _holder_of_each_node(tree: ast.Module) -> dict[ast.AST, str]:
 def _sites_where(matches: Callable[[ast.expr], bool]) -> list[Site]:
     """Every expression the predicate accepts, as (module, enclosing function, line)."""
     found: list[Site] = []
-    for path in sorted(APP.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        holder = _holder_of_each_node(tree)
+    for module in modules():
+        holder = _holder_of_each_node(module.tree)
         found.extend(
-            Site(str(path.relative_to(APP)), holder.get(node, "<module level>"), node.lineno)
-            for node in ast.walk(tree)
+            Site(str(module.path.relative_to(APP)), holder.get(node, "<module level>"), node.lineno)
+            for node in ast.walk(module.tree)
             if isinstance(node, ast.expr) and matches(node)
         )
     return found

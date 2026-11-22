@@ -212,8 +212,13 @@ and the count of each top-level package. The interpreter sets the standard libra
 leaves it out. The count also leaves out the files that configured telemetry adds: the exporters
 and the instrumentations. The `opentelemetry` API that `app.log` reads is in the count.
 
-- **A rise past the tolerance fails `make lint` and `make lint-check`.** The message names the
-  packages that grew. Import the package where it is used. If the rise is the cost of what you
+- **The tolerance holds the installed packages, not the project's own code.** Every route
+  module of `app` loads before the service serves, so each feature adds to it. The count shows
+  `app` and holds it to nothing (`OWN` in the script). A file costs its import more than its
+  read once the image reads the start files in parallel, so what the gate catches is a package
+  the service loads and never uses at startup.
+- **A rise of the installed packages past the tolerance fails `make lint` and `make lint-check`.**
+  The message names the packages that grew. Import the package where it is used. If the rise is the cost of what you
   added, record it with
   `uv run python devtools/startup.py --baseline .startup-baseline.json --update-baseline` in
   `backend/`. The new count is then in the diff, for review.

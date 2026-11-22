@@ -2,7 +2,6 @@
 sentence. `docs/adr/template/0031`."""
 
 import ast
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -10,10 +9,9 @@ from pydantic import ValidationError
 from app import failing, failures
 from app.failing import AttemptsSpent, Failing, Internal, UndeclarableFailure, cause_of
 from app.models import Failure
+from tests.source import APP, nodes
 
-SOURCE = Path(__file__).resolve().parents[2] / "app"
-
-LIST = SOURCE / "failures.py"
+LIST = APP / "failures.py"
 
 
 def _declared_in_app_failures() -> list[str]:
@@ -26,14 +24,13 @@ def _declared_in_app_failures() -> list[str]:
 
 def _named_outside_app_failures() -> set[str]:
     named: set[str] = set()
-    for path in sorted(SOURCE.rglob("*.py")):
-        if path == LIST or "__pycache__" in path.parts:
+    for module, node in nodes():
+        if module.path == LIST:
             continue
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Name):
-                named.add(node.id)
-            elif isinstance(node, ast.Attribute):
-                named.add(node.attr)
+        if isinstance(node, ast.Name):
+            named.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            named.add(node.attr)
     return named
 
 

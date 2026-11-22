@@ -85,6 +85,10 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   on this machine, divide 0.5 by the number that `uv run python devtools/reference_core.py`
   prints in `backend/`. `pytest --durations=0` and `vitest run --reporter=json` give the time of
   each test. No test holds this rule.
+- **A test that walks a source tree is a rule every change keeps, and the commit gate runs it.**
+  It reads `app/` through `tests/source.py`, which parses every module once per process, so the
+  next rule costs only its own walk. A rule under `slow/` runs only in the suite, after the change
+  merged, so `tests/test_source.py` refuses one there.
 - **Measure before moving a test.** Optimize unnecessary setup first. Use repeated runs with
   the same dependencies to compare CPU and elapsed time. A measured duration never moves a test
   by itself. A person moves it.

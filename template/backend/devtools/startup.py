@@ -9,6 +9,11 @@ from typing import Final
 TOLERANCE: Final = 0.05
 SHOWN: Final = 8
 
+OWN: Final = frozenset({"app"})
+"""The project's own code. Every route module of it loads before the service serves, so each
+feature adds to it. The count shows it and never holds it to the tolerance: the tolerance holds
+the packages the project installs, which a module can import where it is used."""
+
 _DESCRIPTION: Final = (
     "Count the files of app and of the installed packages that the backend loads before it serves. "
     "See docs/deployment.md#a-cold-start."
@@ -80,8 +85,13 @@ def _record(baseline: Path, now: dict[str, int], verb: str) -> int:
     return 0
 
 
+def installed(packages: dict[str, int]) -> int:
+    """The files of the installed packages among `packages`: every package but `OWN`."""
+    return sum(count for package, count in packages.items() if package not in OWN)
+
+
 def check(now: dict[str, int], baseline: Path, tighten: bool) -> int:
-    files = sum(now.values())
+    files = installed(now)
     if not baseline.exists():
         print(
             f"FAIL: no baseline at {baseline}. Record the current count:\n"
@@ -91,16 +101,16 @@ def check(now: dict[str, int], baseline: Path, tighten: bool) -> int:
         )
         return 1
     was = json.loads(baseline.read_text())
-    recorded: int = was["files"]
+    recorded = installed(was["packages"])
     grown = {
         package: count - was["packages"].get(package, 0)
         for package, count in now.items()
-        if count > was["packages"].get(package, 0)
+        if count > was["packages"].get(package, 0) and package not in OWN
     }
     if files > recorded * (1 + TOLERANCE):
         print(
-            f"FAIL: the startup count is {files} files. The baseline is {recorded}, and the "
-            f"tolerance is {TOLERANCE:.0%}.\n"
+            f"FAIL: the installed packages load {files} files at startup. The baseline is "
+            f"{recorded}, and the tolerance is {TOLERANCE:.0%}.\n"
             f"  grew: {_largest(grown, '+')}\n"
             "Import the package where it is used, or record the rise with --update-baseline. "
             "The rise is then in the diff for review.",
@@ -111,12 +121,13 @@ def check(now: dict[str, int], baseline: Path, tighten: bool) -> int:
         if tighten:
             return _record(baseline, now, "tightened")
         print(
-            f"FAIL: the startup count is {files} files, and the baseline is {recorded}. "
+            f"FAIL: the installed packages load {files} files at startup, and the baseline is "
+            f"{recorded}. "
             "A baseline this far above the count stops gating. Run `make lint`.",
             file=sys.stderr,
         )
         return 1
-    print(f"startup ok: {files} files, baseline {recorded}")
+    print(f"startup ok: installed packages {files} files, baseline {recorded}")
     return 0
 
 

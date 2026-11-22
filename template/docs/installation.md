@@ -797,6 +797,16 @@ What to expect, because it is not all free:
   [adr/template/0033](adr/template/0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md)
   says why.
 
+- **From 0.88.0 the startup gate holds the installed packages, and `app` grows freely.** `app`
+  is counted and shown, and no longer held to the tolerance. Nothing to do: the baseline you have
+  still reads, and its count for `app` no longer gates.
+- **From 0.88.0 the rules that walk `app/` share one parse, `tests/source.py`.**
+  `tests/test_source.py` refuses a test under `slow/` that calls `rglob` or reads
+  `tests.source`. If you moved a rule that walks `app/` under `slow/`, move it back beside its
+  subject, and read the tree through `modules()` or `nodes()`. In `AGENTS.md`, take the bullet
+  that starts "A commit-gate test". In `docs/development.md`, take the bullet that starts "A test
+  that walks a source tree".
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name
