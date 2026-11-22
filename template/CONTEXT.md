@@ -333,8 +333,8 @@ _Avoid_: text style, typography class.
 
 **Startup count**:
 The files of `app` and of the installed packages that the backend loads before it serves,
-without telemetry. `backend/.startup-baseline.json` holds it, and the startup gate in
-`make lint` holds the backend to it.
+without telemetry. `backend/.startup-baseline.json` holds it. The startup gate in `make lint`
+holds the installed packages to it. It shows the count of `app` and does not hold it.
 _Avoid_: import count, module count, cold start.
 
 ## Logs

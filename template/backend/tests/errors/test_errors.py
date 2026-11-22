@@ -5,7 +5,7 @@ Read from the source rather than driven, so a raise on a branch no test reaches 
 """
 
 import ast
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import ClassVar, NamedTuple
 
@@ -16,8 +16,7 @@ from app.failures import STILL_SAYS_A_CAUGHT_ERROR
 from app.main import create_app
 from app.refusal import ApiError, responses
 from tests.routes.walk import endpoints_of
-
-SOURCE = Path(__file__).resolve().parents[2] / "app"
+from tests.source import APP, modules, nodes
 
 
 def _error_classes() -> dict[str, type[ApiError]]:
@@ -32,16 +31,8 @@ ERRORS = _error_classes()
 
 
 def _module_of(path: Path) -> str:
-    parts = path.relative_to(SOURCE.parent).with_suffix("").parts
+    parts = path.relative_to(APP.parent).with_suffix("").parts
     return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
-
-
-def _nodes() -> Iterator[tuple[Path, ast.AST]]:
-    """Every AST node in every module under `app/`, with the file it is in."""
-    for path in sorted(SOURCE.rglob("*.py")):
-        if "__pycache__" not in path.parts:
-            for node in ast.walk(ast.parse(path.read_text())):
-                yield path, node
 
 
 def _name_of(node: ast.expr) -> str | None:
@@ -94,7 +85,7 @@ class Route(NamedTuple):
 
 def _routes() -> list[Route]:
     found: list[Route] = []
-    for path, node in _nodes():
+    for module, node in nodes():
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             for decorator in node.decorator_list:
                 route = _route_decorator(decorator)
@@ -105,7 +96,7 @@ def _routes() -> list[Route]:
                     )
                     found.append(
                         Route(
-                            _module_of(path),
+                            _module_of(module.path),
                             node.name,
                             frozenset(_raised_in(node.body)),
                             frozenset(declared),
@@ -143,8 +134,8 @@ def test_a_route_declares_every_refusal_it_raises() -> None:
 
 def test_no_refusal_is_declared_and_unreachable() -> None:
     declared: set[str] = set()
-    for _, node in _nodes():
-        declared |= _named_in(node)
+    for module in modules():
+        declared |= _named_in(module.tree)
 
     unreachable = sorted(set(ERRORS) - declared)
 
@@ -158,8 +149,8 @@ def test_nothing_in_app_builds_an_http_exception() -> None:
     """A bare `HTTPException` is a refusal neither test above can see. `ApiError` subclasses it
     rather than building one, so nothing in `app/` is exempt."""
     bare = sorted(
-        f"{path.relative_to(SOURCE.parent)}:{getattr(node, 'lineno', 0)}"
-        for path, node in _nodes()
+        f"{module.path.relative_to(APP.parent)}:{getattr(node, 'lineno', 0)}"
+        for module, node in nodes()
         if isinstance(node, ast.Call) and _name_of(node.func) == "HTTPException"
     )
 
@@ -237,13 +228,11 @@ def _says_a_caught_error(tree: ast.AST) -> list[int]:
 
 def _said_by_module() -> dict[str, list[int]]:
     """The lines of each module under `app/` that builds a refusal from an error it caught."""
-    said: dict[str, list[int]] = {}
-    for path in sorted(SOURCE.rglob("*.py")):
-        if "__pycache__" not in path.parts:
-            lines = _says_a_caught_error(ast.parse(path.read_text()))
-            if lines:
-                said[str(path.relative_to(SOURCE.parent))] = lines
-    return said
+    return {
+        str(module.path.relative_to(APP.parent)): lines
+        for module in modules()
+        if (lines := _says_a_caught_error(module.tree))
+    }
 
 
 def against_the_count(

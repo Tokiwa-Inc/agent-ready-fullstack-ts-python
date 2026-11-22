@@ -80,11 +80,17 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   Preserve fixture scope and imports when moving a test. Add `__init__.py` to a new Python
   test package. Do not add `slow` to `norecursedirs` or a full-run exclusion.
 - **A commit-gate test takes less than 0.5 seconds on the clock, on the reference core.** Its
-  setup counts. A test that takes longer moves under `slow/`. This rule keeps the commit gate
-  fast enough for every committer, a coding agent in a small sandbox included. To find the limit
+  setup counts. A test that takes longer moves under `slow/`, unless it walks `app/`. This rule
+  keeps the commit gate fast enough for every committer, a coding agent in a small sandbox
+  included. To find the limit
   on this machine, divide 0.5 by the number that `uv run python devtools/reference_core.py`
   prints in `backend/`. `pytest --durations=0` and `vitest run --reporter=json` give the time of
   each test. No test holds this rule.
+- **A test that walks `app/` stays in the commit gate.** It reads `app/` through
+  `tests/source.py`, which parses every module once per process. Then each further test costs
+  only its own walk. A test under `slow/` runs only in the full suite, not in the commit gate.
+  `tests/test_source.py` refuses each `rglob` call and each import of `tests.source` under
+  `slow/`.
 - **Measure before moving a test.** Optimize unnecessary setup first. Use repeated runs with
   the same dependencies to compare CPU and elapsed time. A measured duration never moves a test
   by itself. A person moves it.

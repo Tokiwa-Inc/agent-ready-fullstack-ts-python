@@ -4,10 +4,9 @@ loop. `docs/adr/template/0027`."""
 
 import ast
 from collections.abc import Iterable, Iterator
-from pathlib import Path
 from typing import Final
 
-APP: Final = Path(__file__).resolve().parents[2] / "app"
+from tests.source import APP, modules
 
 RUNS_ITS_OWN_LOOP: Final = {
     "loops.py": "rounds is the loop each other loop runs through",
@@ -32,9 +31,9 @@ def _exits(nodes: Iterable[ast.AST], *, inside_a_loop: bool) -> bool:
     return False
 
 
-def loops_with_no_exit(source: str) -> Iterator[int]:
-    """The line of each `while True` in `source` with no `break` of its own and no `return`."""
-    for node in ast.walk(ast.parse(source)):
+def loops_with_no_exit(tree: ast.AST) -> Iterator[int]:
+    """The line of each `while True` in `tree` with no `break` of its own and no `return`."""
+    for node in ast.walk(tree):
         if (
             isinstance(node, ast.While)
             and isinstance(node.test, ast.Constant)
@@ -46,10 +45,10 @@ def loops_with_no_exit(source: str) -> Iterator[int]:
 
 def test_each_loop_with_no_exit_runs_through_rounds() -> None:
     found = [
-        f"app/{path.relative_to(APP)}:{line}"
-        for path in sorted(APP.rglob("*.py"))
-        if str(path.relative_to(APP)) not in RUNS_ITS_OWN_LOOP
-        for line in loops_with_no_exit(path.read_text(encoding="utf-8"))
+        f"app/{module.path.relative_to(APP)}:{line}"
+        for module in modules()
+        if str(module.path.relative_to(APP)) not in RUNS_ITS_OWN_LOOP
+        for line in loops_with_no_exit(module.tree)
     ]
 
     assert found == [], (
@@ -68,13 +67,13 @@ def test_a_loop_with_no_exit_is_found() -> None:
         "            continue\n"
     )
 
-    assert list(loops_with_no_exit(source)) == [2]
+    assert list(loops_with_no_exit(ast.parse(source))) == [2]
 
 
 def test_a_break_of_an_inner_loop_is_no_exit_of_the_outer_one() -> None:
     source = "while True:\n    while True:\n        break\n    def inner():\n        return 1\n"
 
-    assert list(loops_with_no_exit(source)) == [1]
+    assert list(loops_with_no_exit(ast.parse(source))) == [1]
 
 
 def test_a_loop_that_breaks_or_returns_has_an_exit() -> None:
@@ -90,4 +89,4 @@ def test_a_loop_that_breaks_or_returns_has_an_exit() -> None:
         "        pass\n"
     )
 
-    assert list(loops_with_no_exit(source)) == []
+    assert list(loops_with_no_exit(ast.parse(source))) == []
