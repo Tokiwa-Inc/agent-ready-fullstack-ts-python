@@ -10,9 +10,7 @@ TOLERANCE: Final = 0.05
 SHOWN: Final = 8
 
 OWN: Final = frozenset({"app"})
-"""The project's own code. Every route module of it loads before the service serves, so each
-feature adds to it. The count shows it and never holds it to the tolerance: the tolerance holds
-the packages the project installs, which a module can import where it is used."""
+"""The project's own code. The count shows it, and the tolerance does not hold it."""
 
 _DESCRIPTION: Final = (
     "Count the files of app and of the installed packages that the backend loads before it serves. "

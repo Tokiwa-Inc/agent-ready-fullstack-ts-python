@@ -798,14 +798,19 @@ What to expect, because it is not all free:
   says why.
 
 - **From 0.88.0 the startup gate holds the installed packages, and `app` grows freely.** `app`
-  is counted and shown, and no longer held to the tolerance. Nothing to do: the baseline you have
-  still reads, and its count for `app` no longer gates.
-- **From 0.88.0 the rules that walk `app/` share one parse, `tests/source.py`.**
-  `tests/test_source.py` refuses a test under `slow/` that calls `rglob` or reads
-  `tests.source`. If you moved a rule that walks `app/` under `slow/`, move it back beside its
-  subject, and read the tree through `modules()` or `nodes()`. In `AGENTS.md`, take the bullet
-  that starts "A commit-gate test". In `docs/development.md`, take the bullet that starts "A test
-  that walks a source tree".
+  is counted and shown, and no longer held to the tolerance. Run `make lint` once after the
+  update, and commit `backend/.startup-baseline.json` if it changed. If the installed packages
+  fell past the tolerance while `app` grew, `make lint` lowers the baseline. If they rose past
+  it while `app` shrank, `make lint` fails and names the packages that grew: follow
+  [A cold start](deployment.md#a-cold-start).
+- **From 0.88.0 the tests that walk `app/` share one parse, `tests/source.py`.**
+  `tests/test_source.py` refuses each `rglob` call and each import of `tests.source` under
+  `slow/`. If you moved a test that walks `app/` under `slow/`, move it back beside its
+  subject, and read the tree through `modules()` or `nodes()`. If you keep a copy of
+  `tests/test_source.py` or `tests/devtools/test_startup_count.py` at another path, delete
+  your copy. In `AGENTS.md`, take the bullet that starts "A commit-gate test". In
+  `docs/development.md`, take the bullets that start "A commit-gate test" and "A test that
+  walks `app/`".
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

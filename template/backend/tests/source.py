@@ -1,6 +1,5 @@
-"""The Python source of `backend/app/`, read and parsed once per process, for the rules that walk
-every module of it. A rule that reads the tree here stays in the commit gate: `tests/test_source.py`
-refuses one under a `slow/` folder."""
+"""The Python source of `backend/app/`, read and parsed once per process, for the tests that walk
+every module of it. `tests/test_source.py` refuses a reader of it under a `slow/` folder."""
 
 import ast
 from functools import cache
@@ -12,19 +11,20 @@ APP: Final = Path(__file__).resolve().parents[1] / "app"
 
 
 class Module(NamedTuple):
-    """One module of the source: its path, its text, and its syntax tree. A rule reads the tree
-    and does not change it, because every other rule in the process reads the same one."""
+    """One module of the source: its path and its syntax tree. Every reader in the process shares
+    the tree, so a reader must not change it."""
 
     path: Path
-    text: str
     tree: ast.Module
 
 
 @cache
 def modules() -> tuple[Module, ...]:
     """Every module under `APP`, in path order."""
-    read = [(path, path.read_text(encoding="utf-8")) for path in sorted(APP.rglob("*.py"))]
-    return tuple(Module(path, text, ast.parse(text)) for path, text in read)
+    return tuple(
+        Module(path, ast.parse(path.read_text(encoding="utf-8")))
+        for path in sorted(APP.rglob("*.py"))
+    )
 
 
 @cache
