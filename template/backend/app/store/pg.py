@@ -613,8 +613,9 @@ class PostgresDatabase:
         `app.store.jobs.fenced`, the transaction is not READ ONLY, and holds the claim as
         `scoped` does.
 
-        A write raises `ReadOnlySQLTransactionError`. Raises as `lent` raises, and raises
-        `ReadInsideARead` inside a read of a snapshot. `docs/adr/template/0033`."""
+        A write raises `ReadOnlySQLTransactionError`. Raises as `lent` raises. A read of the
+        request's snapshot raises `ReadInsideARead` inside a read of it.
+        `docs/adr/template/0033`."""
         return snapshots.reading(
             (self, tenant_id),
             lambda: self._snapshot(tenant_id),
