@@ -35,7 +35,7 @@ for every deployment that does not run `app.serve`.
   set. `tests/serve/test_serve.py::test_a_server_error_still_carries_the_headers` holds this.
 - `app.main` sets no security header and caps no body.
   `tests/serve/test_serve.py::test_the_service_on_its_own_sets_none_of_them` holds this.
-- `_refuse_oversized` in `app/serve.py` reads `content-length` and refuses before it reads the
+- `_RefusesOversized` in `app/serve.py` reads `content-length` and refuses before it reads the
   body. It answers `413` above `MAX_BODY_BYTES` and `400` for a length that is not a number. It
   answers `411` for a request that can carry a body and declares no length.
 - `400`, `411` and `413` are not in `openapi.json`. `create_server` passes `openapi_url=None`,

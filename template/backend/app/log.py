@@ -18,15 +18,16 @@ import asyncio
 import logging
 import sys
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from typing import Final, TextIO, final, override
 
 import structlog
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.routing import iter_route_contexts
 from opentelemetry import trace
 from starlette.routing import Match
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 from app import response_limits
@@ -107,7 +108,7 @@ def instrument(app: FastAPI) -> None:
     either way it is echoed on the response. Added in this order so the id is bound before the
     request is timed.
     """
-    app.middleware("http")(_completed)
+    app.add_middleware(LogsRequests)
     app.add_middleware(CorrelationIdMiddleware)
 
 
@@ -472,28 +473,59 @@ def route_answering(request: Request) -> str | None:
     return partial
 
 
-async def _completed(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
-    """Times the request and logs it. A request that raises is logged as a `500`, which is what
-    the server answers once the exception has passed through here. A request cancelled before it
-    answered, such as a part of `GET /reads` past its bound, is logged as cancelled."""
-    started = time.perf_counter()
-    route = route_answering(request)
-    status = 500
-    named: dict[str, str] = {}
-    request.state.request_line = named
-    try:
-        response = await call_next(request)
-        status = response.status_code
-        return response
-    finally:
+class LogsRequests:
+    """The middleware `instrument` adds. Writes the line of a request when its response starts. A
+    request that raises before then is logged as a `500`, which is what the server answers once
+    the exception has passed through here. A request cancelled before then, such as a part of
+    `GET /reads` past its bound, is logged as cancelled."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app: ASGIApp = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        line = _RequestLine(scope, send)
+        try:
+            await self._app(scope, receive, line.send)
+        finally:
+            line.end()
+
+
+class _RequestLine:
+    """One request's line, written once: when its response starts, or when it ends without one."""
+
+    def __init__(self, scope: Scope, send: Send) -> None:
+        self._started: float = time.perf_counter()
+        self._request: Request = Request(scope)
+        self._send: Send = send
+        self._route: str | None = route_answering(self._request)
+        self._named: dict[str, str] = {}
+        self._request.state.request_line = self._named
+        self._written: bool = False
+
+    async def send(self, message: Message) -> None:
+        if message["type"] == "http.response.start":
+            self._completed(message["status"])
+        await self._send(message)
+
+    def end(self) -> None:
+        """Write the line of a request whose response did not start: cancelled, or a `500`."""
+        if self._written:
+            return
         if cancelling():
-            request_cancelled(request.method, route, _since(started))
+            request_cancelled(self._request.method, self._route, _since(self._started))
         else:
-            declared = request.scope.get(response_limits.STATE)
-            over = isinstance(declared, response_limits.Declaration) and declared.over_limit
-            request_completed(request.method, route, status, _since(started), named, over)
+            self._completed(500)
+
+    def _completed(self, status: int) -> None:
+        self._written = True
+        declared = self._request.scope.get(response_limits.STATE)
+        over = isinstance(declared, response_limits.Declaration) and declared.over_limit
+        request_completed(
+            self._request.method, self._route, status, _since(self._started), self._named, over
+        )
 
 
 def _since(started: float) -> float:

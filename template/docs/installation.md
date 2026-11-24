@@ -909,6 +909,16 @@ What to expect, because it is not all free:
   - In `docs/backend.md`, take the template's bullet that starts "A store read answers one page".
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 
+- **From 0.95.0 every middleware in `app/` is plain ASGI.** `tests/main/test_middleware.py`
+  fails on each `.middleware("http")` call and on each `BaseHTTPMiddleware` in `app/`. Before
+  0.95.0 a part of `GET /reads` past its bound could leave its snapshot open when its connection
+  went back to the pool, and asyncio logged `Resetting connection with an active transaction`.
+  After the update, write each middleware of yours that the test names as a class with
+  `__call__(scope, receive, send)`, and add it with `app.add_middleware` where the decorator was.
+  `LogsRequests` in `app/log.py` is one to copy.
+  [adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md) says
+  why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

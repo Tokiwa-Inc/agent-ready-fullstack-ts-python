@@ -55,7 +55,11 @@ nearly every screen read in one group, its largest screen 19 reads in one.
   A `/reads` whose ceiling cannot name each of its paths as a part that left is refused with
   `GroupTooLarge`, a `422`, so a group never passes the ceiling. One line `part left its group`
   names each route and reason, with the number of parts. A part that leaves on its bound is
-  cancelled, and writes `request cancelled`, not `request completed`. The client sends a part that
+  cancelled, and writes `request cancelled`, not `request completed`. The cancel is asyncio's, and
+  every middleware in `app/` is plain ASGI, so the cleanup of the part runs to its end: its snapshot rolls
+  back before its connection goes back to the pool. A `BaseHTTPMiddleware`, which
+  `@app.middleware("http")` builds, runs the app in an anyio task group, which cancels each await
+  of that cleanup again. `tests/main/test_middleware.py` refuses one. The client sends a part that
   left once more, alone, in the same call, and never while a `Retry-After` holds. It is the same
   read under 0024. This is the one retry of a read that reached the server. `readsOf` counts the
   second request, so a part that always leaves fails its budget.
