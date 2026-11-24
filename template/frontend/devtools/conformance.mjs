@@ -307,8 +307,9 @@ function exportedNames(code) {
 function filenameExports(file, code) {
   if (!/\.tsx$/.test(file)) return [];
   const exported = exportedNames(code);
-  const wanted = expectedExport(file);
-  if (exported.length === 0 || exported.some((entry) => entry.name === wanted)) return [];
+  const wanted = expectedExport(file).toLowerCase();
+  const named = (entry) => /[a-z]/.test(entry.name) && entry.name.toLowerCase() === wanted;
+  if (exported.length === 0 || exported.some(named)) return [];
   return [{ index: exported[0].index, text: exported[0].name }];
 }
 
