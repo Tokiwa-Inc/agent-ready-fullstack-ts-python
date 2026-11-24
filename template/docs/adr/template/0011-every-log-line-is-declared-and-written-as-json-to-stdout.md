@@ -22,7 +22,7 @@ browser.
 
 Without a tenant on each request line, one tenant's requests cannot be read apart from another's
 on the log alone. A contextvar that a dependency sets inside the request does not reach the
-middleware that writes the line after the response.
+middleware that writes the line when the response starts.
 
 ## Decision
 
@@ -45,7 +45,7 @@ middleware that writes the line after the response.
   tenant requirement's router carries `app/deps.py::resolved_principal`, which depends on
   `principal_for` and calls `app/log.py::name_principal`. That function writes to
   `request.state`. `request.state` is the one place where a dependency can leave a value that
-  the middleware reads after the response. Every field of `TEMPLATE_FIELDS` is null when the
+  the middleware reads when the response starts. Every field of `TEMPLATE_FIELDS` is null when the
   request resolves no principal: on a public route, or when the identity seam refuses the
   request. `test_each_request_is_logged_with_the_principal_it_resolved` holds this.
 - `name_principal` names the tenant and the actor together, and nothing else names either.

@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Final
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from app import response_limits
@@ -115,8 +115,6 @@ each is argued in `docs/adr/template/0009`:
 is a decision about a domain rather than about this code.
 """
 
-Next = Callable[[Request], Awaitable[Response]]
-
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
 Receive = Callable[[], Awaitable[Message]]
@@ -155,7 +153,7 @@ def create_server(bundle: Path, api: FastAPI) -> ASGIApp:
     limits = build_response_limits()
     server = FastAPI(lifespan=lifespan, openapi_url=None)
     server.add_exception_handler(500, internal_error)
-    server.middleware("http")(_refuse_oversized)
+    server.add_middleware(_RefusesOversized)
     server.mount(PREFIX, api)
 
     @server.get("/{held:path}", include_in_schema=False)
@@ -229,25 +227,39 @@ def _confined(app: ASGIApp) -> ASGIApp:
     return confined
 
 
-async def _refuse_oversized(request: Request, call_next: Next) -> Response:
+class _RefusesOversized:
     """Refuse before reading, which is the only point at which refusing is cheap.
 
     The declared length is checked rather than the body counted, because a body counted is a
     body already received — and the request worth refusing is exactly the one it would have
     cost something to read.
     """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app: ASGIApp = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        refusal = _refusal(Request(scope)) if scope["type"] == "http" else None
+        if refusal is None:
+            await self._app(scope, receive, send)
+        else:
+            await refusal(scope, receive, send)
+
+
+def _refusal(request: Request) -> JSONResponse | None:
+    """The answer that refuses `request` for its body, or `None` when its body may be read."""
     declared = request.headers.get("content-length")
     if declared is None:
         if _unmeasurable(request):
             return JSONResponse(
                 {"detail": f"{request.method} must declare a content-length"}, status_code=411
             )
-        return await call_next(request)
+        return None
     if not declared.isdecimal():
         return JSONResponse({"detail": "malformed content-length"}, status_code=400)
     if int(declared) > MAX_BODY_BYTES:
         return JSONResponse({"detail": f"body exceeds {MAX_BODY_BYTES} bytes"}, status_code=413)
-    return await call_next(request)
+    return None
 
 
 def _unmeasurable(request: Request) -> bool:
