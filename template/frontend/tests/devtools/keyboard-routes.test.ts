@@ -37,7 +37,6 @@ describe("the conformance gate on a handler that needs no keyboard route", () =>
       "a handler Biome does not read beside a focus handler",
       "<div onScroll={f} onBlur={f}>a</div>",
     ],
-    ["a submit and a focus handler on a form", "<form onSubmit={f} onBlur={f}>a</form>"],
     ["a focus handler after emoji and an accent on its line", "<i>😀😀😀😀é<b onBlur={f} /></i>"],
     [
       "a handler name inside an attribute's value",
@@ -96,18 +95,24 @@ describe("the handlers the conformance gate reads", () => {
 
   afterEach(conformance.close);
 
-  const READ = ["onClick", "onDblClick", "onDragOver", "onKeyDown", "onMouseDown", "onMouseMove"];
+  const FAILING = [
+    ...["onLoad", "onError", "onKeyDown", "onKeyPress", "onKeyUp", "onClick", "onContextMenu"],
+    ...["onDblClick", "onDoubleClick", "onDrag", "onDragEnd", "onDragEnter", "onDragExit"],
+    ...["onDragLeave", "onDragOver", "onDragStart", "onDrop", "onMouseDown", "onMouseMove"],
+    "onMouseUp",
+  ];
+  const HOVER = ["onMouseEnter", "onMouseLeave", "onMouseOver", "onMouseOut"];
+  const FOCUS = ["onFocus", "onBlur"];
   const UNREAD = [
-    "onScroll",
-    "onChange",
-    "onPointerDown",
-    "onPointerEnter",
-    "onTouchStart",
-    "onWheel",
+    ...["onScroll", "onWheel", "onChange", "onInput", "onSubmit", "onReset", "onAuxClick"],
+    ...["onPointerDown", "onPointerUp", "onPointerMove", "onPointerEnter", "onPointerLeave"],
+    ...["onPointerOver", "onPointerOut", "onPointerCancel", "onTouchStart", "onTouchEnd"],
+    ...["onTouchMove", "onTouchCancel", "onFocusCapture", "onBlurCapture", "onClickCapture"],
+    ...["onKeyDownCapture", "onCopy", "onCut", "onPaste", "onSelect", "onTransitionEnd"],
   ];
 
   it("are the ones Biome reads, alone and beside a focus handler", () => {
-    const names = [...READ, ...UNREAD].flatMap((name) => [name, name]);
+    const names = [...FAILING, ...HOVER, ...FOCUS, ...UNREAD].flatMap((name) => [name, name]);
     const elements = names.map((name, at) =>
       at % 2 === 0 ? `<p ${name}={f}>a</p>` : `<p onBlur={f} ${name}={f}>a</p>`,
     );
@@ -115,6 +120,6 @@ describe("the handlers the conformance gate reads", () => {
     const run = conformance.run("handled.tsx", handledBy(markup), NO_PROJECT_RULES);
     const lineOf = (line: string) => Number(line.slice(run.path.length + 1).split(/\s/)[0]);
     const reported = run.lines.map((line) => names[lineOf(line) - 4]);
-    expect(reported.sort()).toEqual(READ.flatMap((name) => [name, name]).sort());
+    expect(reported.sort()).toEqual([...FAILING, ...FAILING, ...HOVER].sort());
   });
 });
