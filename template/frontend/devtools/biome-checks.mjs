@@ -22,7 +22,8 @@ export const BIOME_CHECKS = [
   },
 ];
 
-const MARKUP = /\.tsx?$/;
+const TYPESCRIPT_FILE = /\.tsx?$/;
+const REPORT_BYTES = 256 * 1024 * 1024;
 
 function checkConfig(directory) {
   const path = join(directory, "biome.json");
@@ -38,22 +39,24 @@ function checkConfig(directory) {
   return path;
 }
 
-function reported(stdout) {
+function diagnosticsIn(stdout, notAReport) {
+  let report;
   try {
-    return JSON.parse(stdout).diagnostics;
+    report = JSON.parse(stdout);
   } catch (error) {
-    if (error instanceof SyntaxError) return null;
+    if (error instanceof SyntaxError) return fail(notAReport);
     throw error;
   }
+  if (!Array.isArray(report?.diagnostics)) return fail(notAReport);
+  return report.diagnostics;
 }
 
 function fault(error) {
   if (error.code === "ENOENT") return "biome was not found on PATH; run this through pnpm.";
-  const first = (reported(error.stdout) ?? []).find((one) => one.severity === "error");
-  if (first !== undefined) {
-    return `biome could not check ${first.location.path}: ${first.message.trim()}`;
-  }
-  return `biome failed (exit ${error.status}): ${String(error.stderr).trim()}`;
+  const failed = `biome failed (exit ${error.status}): ${String(error.stderr).trim()}`;
+  const first = diagnosticsIn(error.stdout, failed).find((one) => one.severity === "error");
+  if (first === undefined) return failed;
+  return `biome could not check ${first.location.path}: ${first.message.trim()}`;
 }
 
 function runBiome(files) {
@@ -66,26 +69,24 @@ function runBiome(files) {
     "--reporter=json",
     "--max-diagnostics=none",
   ];
-  let failure;
+  let failed;
   try {
     return execFileSync("biome", [...args, ...only, ...files], {
       encoding: "utf8",
-      maxBuffer: 256 * 1024 * 1024,
+      maxBuffer: REPORT_BYTES,
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {
-    failure = fault(error);
+    failed = error;
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-  return fail(failure);
+  return fail(fault(failed));
 }
 
 function diagnosticsOf(files) {
   const stdout = runBiome(files);
-  const diagnostics = reported(stdout);
-  if (diagnostics === null) fail(`biome answered something other than its JSON report: ${stdout}`);
-  return diagnostics;
+  return diagnosticsIn(stdout, `biome answered something other than its JSON report: ${stdout}`);
 }
 
 function checkOf(diagnostic) {
@@ -100,7 +101,7 @@ function checkOf(diagnostic) {
 }
 
 export function biomeViolations(files) {
-  const linted = files.filter((file) => MARKUP.test(file));
+  const linted = files.filter((file) => TYPESCRIPT_FILE.test(file));
   if (linted.length === 0) return [];
   const asked = new Map(linted.map((file) => [resolve(file), file]));
   return diagnosticsOf(linted).map((diagnostic) => {

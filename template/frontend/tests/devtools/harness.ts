@@ -11,6 +11,12 @@ export type Run = {
   lines: string[];
 };
 
+export const BIOME_RULES = [
+  "handler-on-a-non-interactive-element",
+  "query-result-rest",
+  "react-compiler",
+];
+
 export const NO_PROJECT_RULES = "export const RULES = [];";
 
 export function gate(script: string, prefix: string) {

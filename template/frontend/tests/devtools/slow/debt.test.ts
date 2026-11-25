@@ -11,7 +11,7 @@ import {
   rulesOf,
   TWO_COLOURS,
 } from "../debt-gate";
-import { NO_PROJECT_RULES } from "../harness";
+import { BIOME_RULES, NO_PROJECT_RULES } from "../harness";
 
 const { conformance, debtFile, debt, run } = debtGate();
 
@@ -140,8 +140,6 @@ describe("the conformance debt on a rule it does not name yet", () => {
     expect(status).toBe(1);
   });
 });
-
-const BIOME_RULES = ["handler-on-a-non-interactive-element", "query-result-rest", "react-compiler"];
 
 const COPYING = [
   "import { useEffect, useState } from 'react';",
