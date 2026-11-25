@@ -199,12 +199,16 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   apply to them. `react-compiler` sees a setter that an effect calls, a function of the
   component that calls one, and a function whose name starts with `set`. It does not see a
   function from a context or a prop that sets state somewhere else. No check sees that copy.
-  `AGENTS.md` forbids it. `handler-on-a-non-interactive-element` lets two kinds of handler pass.
-  `onLoad` and `onError` on an `img` or an `iframe` answer the resource, not a person.
-  `onFocus` and `onBlur`, and their `Capture` forms, pass on any element: a focus event reaches an
-  element that cannot take focus only from a focused control inside it. A key handler still
-  fails: a container that handles keys is a widget, and says so with that widget's role. An
-  element that also holds any other handler still fails.
+  `AGENTS.md` forbids it.
+
+  `handler-on-a-non-interactive-element` counts a handler that a keyboard cannot reach. Three
+  kinds of handler need no keyboard route, and do not count. `onLoad` and `onError` on an `img`
+  or an `iframe` answer the resource, not a person. `onFocus` and `onBlur`, and their `Capture`
+  forms, do not count on any element: an element that cannot take focus gets a focus event only
+  from a focused control inside it. `onSubmit` and `onReset` on a `form` do not count: Enter in a
+  field submits the form. A key handler counts on every element: a container that handles keys is
+  a widget, and says so with that widget's role. An element that holds any other handler counts.
+  The check reads each element that Biome reports with the parser that Vite ships.
 
   `@biomejs/biome` is held to one version, because a patch release can change what a nursery
   rule finds.

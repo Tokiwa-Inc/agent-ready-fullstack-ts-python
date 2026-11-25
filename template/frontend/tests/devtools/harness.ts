@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export type Run = {
   status: number | null;
@@ -29,6 +29,7 @@ export function gate(script: string, prefix: string) {
       directory = join(root, "tree");
       writeFileSync(join(root, "package.json"), "{}\n");
       cpSync("devtools", join(root, "devtools"), { recursive: true });
+      symlinkSync(resolve("node_modules"), join(root, "node_modules"), "dir");
       mkdirSync(join(root, "src"));
       writeFileSync(join(root, "src", "index.css"), "");
       mkdirSync(directory);
