@@ -200,10 +200,11 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   component that calls one, and a function whose name starts with `set`. It does not see a
   function from a context or a prop that sets state somewhere else. No check sees that copy.
   `AGENTS.md` forbids it. `handler-on-a-non-interactive-element` lets two kinds of handler pass.
-  `onLoad` and `onError` on an `img` or an `iframe` answer the resource, not a person. A focus or
-  key handler on a `form`, `fieldset`, `table` or `label` catches the events of the controls
-  inside it, and the keyboard reaches those controls. An element that also holds any other
-  handler still fails.
+  `onLoad` and `onError` on an `img` or an `iframe` answer the resource, not a person.
+  `onFocus` and `onBlur`, and their `Capture` forms, pass on any element: a focus event reaches an
+  element that cannot take focus only from a focused control inside it. A key handler still
+  fails: a container that handles keys is a widget, and says so with that widget's role. An
+  element that also holds any other handler still fails.
 
   `@biomejs/biome` is held to one version, because a patch release can change what a nursery
   rule finds.

@@ -27,10 +27,11 @@ const TYPESCRIPT_FILE = /\.tsx?$/;
 
 const RESOURCE_EVENTS = new Set(["onLoad", "onError"]);
 const RESOURCE_ELEMENTS = new Set(["img", "iframe"]);
-const FOCUS_AND_KEY_EVENTS = new Set(["onFocus", "onBlur", "onKeyDown", "onKeyUp"]);
-const CONTAINERS = new Set(["form", "fieldset", "table", "label"]);
+const FOCUS_EVENTS = new Set(["onFocus", "onBlur", "onFocusCapture", "onBlurCapture"]);
 const OPENING_TAG = /^<([A-Za-z][\w.]*)/;
-const HANDLER = /\b(on[A-Z]\w*)\s*=/g;
+const ATTRIBUTE_NAME = /(?:^|\s)(on[A-Z]\w*)\s*=/g;
+const LITERAL = /"[^"]*"|'[^']*'|`[^`]*`/g;
+const INNERMOST_EXPRESSION = /\{[^{}]*\}/g;
 const REPORT_BYTES = 256 * 1024 * 1024;
 
 function checkConfig(directory) {
@@ -121,15 +122,24 @@ function openingTag(file, location) {
   ].join("\n");
 }
 
+function attributesOnly(tag) {
+  let kept = tag.replace(LITERAL, "");
+  for (let left = kept.replace(INNERMOST_EXPRESSION, ""); left !== kept; ) {
+    kept = left;
+    left = kept.replace(INNERMOST_EXPRESSION, "");
+  }
+  return kept;
+}
+
 function excused(element, handler) {
   if (RESOURCE_EVENTS.has(handler)) return RESOURCE_ELEMENTS.has(element);
-  return FOCUS_AND_KEY_EVENTS.has(handler) && CONTAINERS.has(element);
+  return FOCUS_EVENTS.has(handler);
 }
 
 function needsNoKeyboardRoute(file, location) {
   const tag = openingTag(file, location);
   const element = OPENING_TAG.exec(tag)?.[1];
-  const handlers = [...tag.matchAll(HANDLER)].map((found) => found[1]);
+  const handlers = [...attributesOnly(tag).matchAll(ATTRIBUTE_NAME)].map((found) => found[1]);
   if (element === undefined || handlers.length === 0) return false;
   return handlers.every((handler) => excused(element, handler));
 }

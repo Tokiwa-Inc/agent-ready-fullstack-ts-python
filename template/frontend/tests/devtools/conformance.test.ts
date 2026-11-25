@@ -159,11 +159,14 @@ describe("the conformance gate on what biome finds", () => {
   it.each([
     ["a resource event on an image", "<img src='a.png' alt='' onLoad={f} />"],
     ["a resource event on a frame", "<iframe src='a.html' title='a' onError={f} />"],
-    ["a focus handler on a fieldset", "<fieldset onBlur={f}>a</fieldset>"],
-    ["a key handler on a table", "<table onKeyDown={f}><tbody /></table>"],
+    ["a focus handler on any element", "<div onBlur={f}>a</div>"],
     [
-      "key handlers on a form across lines",
-      "<form\n      onKeyDown={f}\n      onKeyUp={f}\n    >\n      a\n    </form>",
+      "focus handlers across lines",
+      "<section\n      onFocusCapture={f}\n      onBlur={f}\n    >\n      a\n    </section>",
+    ],
+    [
+      "a handler name inside an attribute's expression",
+      "<div onBlur={() => { const onClick = f; onClick(); }} title='onKeyDown = x'>a</div>",
     ],
   ])("lets %s pass", (_case, markup) => {
     const { rules } = scan("handled.tsx", handledBy(markup));
@@ -173,7 +176,9 @@ describe("the conformance gate on what biome finds", () => {
   it.each([
     ["a click on a paragraph", "<p onClick={f}>a</p>"],
     ["a pointer move on a drawing", "<svg onMouseMove={f} />"],
-    ["a click beside a key handler on a form", "<form onKeyDown={f} onClick={f}>a</form>"],
+    ["a key handler on a table", "<table onKeyDown={f}><tbody /></table>"],
+    ["a key handler on a form", "<form onKeyDown={f}>a</form>"],
+    ["a click beside a focus handler", "<div onBlur={f} onClick={f}>a</div>"],
     ["a resource event on a paragraph", "<p onLoad={f}>a</p>"],
   ])("reports %s", (_case, markup) => {
     const { status, rules } = scan("handled.tsx", handledBy(markup));
