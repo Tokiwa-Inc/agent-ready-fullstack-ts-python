@@ -18,7 +18,7 @@ import asyncio
 import logging
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Final, TextIO, final, override
 
 import structlog
@@ -317,6 +317,66 @@ def loop_held(
         "event loop held",
         cpu_ms=round(cpu_seconds * 1000, 1),
         late_ms=round(late_seconds * 1000, 1),
+        **{"code.function.name": function, "code.line.number": line},
+    )
+
+
+def connection_held(
+    *,
+    pool: str,
+    route: str | None,
+    function: str | None,
+    line: int | None,
+    held_ms: float,
+    idle_ms: float | None,
+) -> None:
+    """A connection of the pool `pool` is still lent `Timeouts.held` after it was taken. `route`
+    names the unit of work that holds it, and `None` for a block outside every unit. `function`
+    and `line` name the code of its latest block. `held_ms` is the time since it was taken, and
+    `idle_ms` the time since its latest block ended, `None` while a block runs."""
+    _LOG.warning(
+        "connection held",
+        pool=pool,
+        route=route,
+        held_ms=held_ms,
+        idle_ms=idle_ms,
+        **{"code.function.name": function, "code.line.number": line},
+    )
+
+
+def acquire_timed_out(
+    *,
+    pool: str,
+    waited_ms: float,
+    holders: Sequence[Mapping[str, str | int | float | None]],
+    releasing: int,
+    opening: int,
+) -> None:
+    """No connection of the pool `pool` came within `Timeouts.acquire`. `holders` names each
+    connection lent then, as `connection held` does: `route`, `code.function.name`,
+    `code.line.number`, `held_ms` and `idle_ms`. `releasing` counts the connections that go back
+    to the pool, and `opening` the ones that open for a wait."""
+    _LOG.warning(
+        "acquire timed out",
+        pool=pool,
+        waited_ms=waited_ms,
+        holders=list(holders),
+        releasing=releasing,
+        opening=opening,
+    )
+
+
+def unit_would_refuse(
+    *, route: str | None, refusal: str, function: str | None, line: int | None
+) -> None:
+    """A database that does not enforce the unit of work let a block or a wait that it would
+    refuse with `refusal` pass: a block on a connection of its own, or a wait that holds the
+    connection. `route` names the unit, and `None` outside every unit. `function` and `line`
+    name the code."""
+    _LOG.warning(
+        "unit of work would refuse",
+        route=route,
+        refusal=refusal,
         **{"code.function.name": function, "code.line.number": line},
     )
 

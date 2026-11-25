@@ -15,6 +15,7 @@ from app.deployment import (
     DATABASE_URL_ENV,
     ENVIRONMENT_ENV,
     HEADERS_ENV,
+    HELD_REPORTED_AFTER_ENV,
     IDLE_IN_TRANSACTION_TIMEOUT_ENV,
     INSTANCES_ENV,
     NOT_READ,
@@ -30,9 +31,11 @@ from app.deployment import (
     SERVICE_NAME_ENV,
     STATEMENT_TIMEOUT_ENV,
     TRUST_INBOUND_CONTEXT_ENV,
+    UNIT_OF_WORK_MODE_ENV,
 )
 from app.migrate import OWNER_URL_ENV
 from app.store.budget import TEMPLATE_IN_PROCESS, Draws
+from app.store.pg import PostgresDatabase
 from app.store.timeouts import TIMEOUTS, Timeouts
 from app.wiring import (
     AdmissionMisconfigured,
@@ -42,6 +45,7 @@ from app.wiring import (
     TelemetryMisconfigured,
     TelemetrySettings,
     TimeoutsMisconfigured,
+    UnitOfWorkMisconfigured,
     build,
     build_admission,
     build_draws,
@@ -187,8 +191,11 @@ def test_each_timeout_a_deployment_sets_is_read_in_seconds(
     monkeypatch.setenv(STATEMENT_TIMEOUT_ENV, "8")
     monkeypatch.setenv(IDLE_IN_TRANSACTION_TIMEOUT_ENV, " 600.5 ")
     monkeypatch.setenv(ACQUIRE_TIMEOUT_ENV, "0.25")
+    monkeypatch.setenv(HELD_REPORTED_AFTER_ENV, "30")
 
-    assert build_timeouts() == Timeouts(statement=8.0, idle_in_transaction=600.5, acquire=0.25)
+    assert build_timeouts() == Timeouts(
+        statement=8.0, idle_in_transaction=600.5, acquire=0.25, held=30.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -375,3 +382,38 @@ def test_an_admission_value_that_is_not_one_refuses_to_start(
 
     with pytest.raises(AdmissionMisconfigured, match=variable):
         build_admission()
+
+
+@pytest.mark.parametrize(
+    ("said", "enforced"), [(None, True), ("enforce", True), ("evaluate", False)]
+)
+def test_a_database_enforces_the_unit_of_work_unless_the_deployment_evaluates_it(
+    monkeypatch: pytest.MonkeyPatch, said: str | None, enforced: bool
+) -> None:
+    monkeypatch.setenv(DATABASE_URL_ENV, "postgres://app_app@db.internal:5432/app")
+    if said is not None:
+        monkeypatch.setenv(UNIT_OF_WORK_MODE_ENV, said)
+
+    database = build()
+
+    assert isinstance(database, PostgresDatabase)
+    assert database.enforced is enforced
+
+
+def test_a_unit_of_work_mode_that_is_neither_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(DATABASE_URL_ENV, "postgres://app_app@db.internal:5432/app")
+    monkeypatch.setenv(UNIT_OF_WORK_MODE_ENV, "report")
+
+    with pytest.raises(UnitOfWorkMisconfigured, match="'report'"):
+        build()
+
+
+def test_a_unit_of_work_mode_without_a_database_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(UNIT_OF_WORK_MODE_ENV, "evaluate")
+
+    with pytest.raises(UnitOfWorkMisconfigured, match=DATABASE_URL_ENV):
+        build()

@@ -5,8 +5,9 @@ Date: 2026-11-14
 ## Status
 
 Accepted. [0033](0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md) replaces
-two of its considered options, a cache for the request and one unit of work for the request, for
-the reads of a GET request.
+one of its considered options, a cache for the request, for the reads of a GET request.
+[0034](0034-a-unit-of-work-holds-one-connection.md) takes another, one
+unit of work for the whole request.
 
 ## Context
 
@@ -15,7 +16,8 @@ request made 1,005 round trips to Postgres, in 172 transactions. The database us
 its CPU. Each round trip took about 3.7 ms. The request took 0.93 s at the median.
 
 The screen found the facts of each project with store calls for that project: about 7 calls for
-each. Each store call is one unit of work, and the trace showed 6 round trips for each unit. So
+each. Each store call was one transaction on a connection of its own, and the trace showed 6
+round trips for each. So
 the cost of the request grew with the rows of the page.
 
 [0026](0026-every-store-read-is-a-page.md) bounds the rows of one read, and not the reads of one
@@ -39,17 +41,20 @@ page could hold every connection of a process.
   the turn. When the turn ends, it runs each set read of the turn once, for every key asked of it.
   A key asked twice in a turn is read once. More than `PAGE_MAX` keys go `PAGE_MAX` at a time.
   The items of a page start in one `asyncio.TaskGroup`, so each asks in the same turn.
-- **A turn is one unit of work, and a loader runs one turn at a time.** Each set read of the
-  turn runs, one after another, on one connection of `reading`: in a GET request, the request's
-  snapshot ([0033](0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md)), and
-  elsewhere one transaction. A turn waits until the turn before
-  it ends. So one loader holds one connection at a time.
-- **A turn is shared work.** The loader runs each turn through `SharedWork`
+- **A turn is one block of `reading`, and a loader runs one turn at a time.** Each set read of
+  the turn runs, one after another, in one block on the connection of the request's unit of work
+  ([0034](0034-a-unit-of-work-holds-one-connection.md)): in a GET
+  request, the request's snapshot
+  ([0033](0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md)), and elsewhere
+  one transaction. A turn waits until the turn before it ends.
+- **A turn is shared work in the unit of work of its callers.** The loader runs each turn through
+  `SharedWork(..., in_the_callers_unit=True)`
   ([0021](0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md)). A failure raises
   in each caller of the turn. When each caller is cancelled, the turn is cancelled, and it leaves
-  its unit of work, which rolls back. `cancel_beside` cancels a turn at shutdown.
+  its block, which rolls back. `cancel_beside` cancels a turn at shutdown.
 - **A set read reads only on the connection it is handed.** A set read that asked its own loader
-  would wait for its own turn, and one that asked another loader would take a second connection.
+  would wait for its own turn, and one that asked another loader would wait for ever for the
+  block that it runs in.
   `Loader.load` raises `RuntimeError` in a set read.
 - **A failure of one key's value fails that key only.** Work for many items catches a failure at
   the item, as `AGENTS.md` says, so a set read answers that failure for its key: an exception,
@@ -83,23 +88,25 @@ page could hold every connection of a process.
   when a route makes more statements or takes more connections past a page than at one row. It
   fails when a request holds more than one connection at once. The count is at the connection, as
   in 0026, so a new store method cannot escape it.
-- **A route that broke this rule when the project recorded the list stays named, with its reason,
-  until it meets the rule.**
-  `GROWS_WITH_ROWS` and `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py` each map a GET
-  route template to its reason. The template ships both empty. Each has the rules of
-  `OVER_A_PAGE`: the test fails on a route over the rule that the list does not name, on a listed
-  route that meets the rule, on an entry that is no GET route that the test reads, and on an
-  empty reason. Each only shrinks, by the list debt of 0026. `filled` is the project's, as
+- **A route whose reads grew when the project recorded the list stays named, with its reason,
+  until its reads do not grow.**
+  `GROWS_WITH_ROWS` in `tests/integration/filled.py` maps a GET route template to its reason. The
+  template ships it empty. It has the rules of `OVER_A_PAGE`: the test fails on a route over the
+  rule that the list does not name, on a listed route that meets the rule, on an entry that is no
+  GET route that the test reads, and on an empty reason. It only shrinks, by the list debt of
+  0026. No list names a route that holds more than one connection at once: a unit of work holds
+  one (0034). `filled` is the project's, as
   [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says, and takes
   the number of rows to write.
-- **The test holds itself to its purpose.** A second test adds a route that reads the title of
-  each task of a page alone, a route that starts those reads at once in a `TaskGroup`, and a route
-  that reads them through the loader. It asserts that the first two grow with the rows, and that
-  the loader's route reads as much past a page as at one row. Each reads on the one connection of
-  the request's snapshot (0033), so the test holds a route that writes while it reads to more than
-  one connection. Another test holds a connection while a route reads, in shared work that the
-  lifespan starts, and in shared work that work beside the request starts. It asserts that the
-  route holds one connection at a time, and counts the same on each read.
+- **The test holds itself to its purpose.** A second test adds a route that reads the title of each
+  task of a page alone, a route that starts those reads at once in a `TaskGroup`, and a route that
+  reads them through the loader. It asserts that the first two grow with the rows, and that the
+  loader's route reads as much past a page as at one row. Each reads on the one connection of the
+  request's unit of work (0034). Under `UNIT_OF_WORK_MODE=evaluate`, a route that writes inside a
+  read holds two connections, and the test finds it. Another test holds a connection while a route
+  reads, in shared work that the lifespan starts, and in shared work that work beside the request
+  starts. It asserts that the route holds one connection at a time, and counts the same on each
+  read.
 
 ## Considered options
 
@@ -120,11 +127,6 @@ page could hold every connection of a process.
 - **A set read on each store port, which the route calls with every key.** Each screen must then
   collect the keys of its items before it reads, and code for one item becomes code for a set.
   The loader keeps the code for one item, and reads its keys as a set.
-- **One unit of work for the whole request.** It removes the round trips of each store call,
-  and it changes `scoped`, the unit that [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md)
-  records, and what `ConnectionLost` means in 0022. It is a decision of its own. One unit for
-  each turn is the part of it that reads need. 0033 takes one snapshot for the reads of a GET
-  request, and keeps one unit for each write.
 - **Compare a page with ten pages.** A route reads one page, so its reads are the same at both,
   even when it reads each row alone.
 
@@ -137,8 +139,8 @@ page could hold every connection of a process.
   sees it, as more statements past a page. An item that awaits something outside the database
   before it asks the loader may ask in a later turn than the other items. Whether it does depends
   on timing, so the test may not see it. A review finds it.
-- A read that a route makes outside the loader, at once with a turn, takes a second connection.
-  The test sees it as more than one connection at once.
+- A read that a route makes outside the loader, at once with a turn, waits for the block of the
+  turn on the connection of the unit.
 - A project's set reads are SQL on Postgres. The memory substrate answers each item from its own
   rows, and needs no loader. A route test on the memory substrate does not see a read that grows.
 - Work beside the requests, and each task and run of shared work that it starts, gets loaders of

@@ -7,6 +7,11 @@ within the budget, runs beside the requests: `beside` starts it outside every re
 several callers await at once is shared work: `SharedWork` runs it one run at a time for each
 key, and each wait in a run has a bound under the budget. The lifespan cancels what is still
 running at shutdown. `docs/adr/template/0021` and `0027`.
+
+Each task of work beside the requests, and each run of shared work, is a unit of work of its own:
+`app/store/units.py`. A unit gives its connection back before each wait here, so no unit holds a
+connection while it waits on something else. A turn of a loader is the one run that a caller
+joins with its connection: it runs in the caller's unit. `docs/adr/template/0034`.
 """
 
 import asyncio
@@ -21,6 +26,7 @@ from fastapi import FastAPI
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app import log
+from app.store import units
 
 REQUEST_BUDGET_SECONDS: Final = 10.0
 """The request budget: the time a request may take, and the threshold of the deployment's
@@ -34,8 +40,6 @@ _IN_A_REQUEST: ContextVar[bool] = ContextVar("in_a_request", default=False)
 _IN_A_PART: ContextVar[bool] = ContextVar("in_a_part", default=False)
 
 _BESIDE: ContextVar[bool] = ContextVar("beside", default=False)
-
-_SHARED: ContextVar[bool] = ContextVar("shared", default=False)
 
 _STARTED: Final[set[asyncio.Task[Any]]] = set()
 
@@ -68,12 +72,6 @@ def started_beside() -> bool:
     """Whether work beside the requests started the running task: it is that work, or a task or a
     run of shared work that the work started, at any depth."""
     return _BESIDE.get()
-
-
-def in_shared_work() -> bool:
-    """Whether a run of `SharedWork` started the running task: it is the run, or a task that the
-    run started, at any depth."""
-    return _SHARED.get()
 
 
 def instrument(app: FastAPI) -> None:
@@ -113,7 +111,13 @@ def in_a_part() -> Generator[None]:
 @asynccontextmanager
 async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
     """Bound the block to `seconds`. Past them the block is cancelled, and `WaitTimedOut` names
-    `on`: the system and the call, such as `"sqlserver.login"`.
+    `on`: the system and the call, such as `"sqlserver.login"`. This is the one door to a system
+    outside the process.
+
+    The unit of work gives its connection back first, through `units.return_the_connection`. The
+    next use of the database takes a connection again, and a read after the wait opens a new
+    snapshot, which sees what was committed during the wait. Raises `HeldAcrossAWait` inside a
+    block of the unit, which would hold the connection for the whole wait.
 
     In a request, raises `WaitOutlastsTheRequest` before the block runs when `seconds` is not under
     `REQUEST_BUDGET_SECONDS`. In a part of `GET /reads`, raises `PartWaitsOutside` before the block
@@ -134,6 +138,7 @@ async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
             f"bound under {REQUEST_BUDGET_SECONDS} s. Make the work a job in app/jobs.py, ask for "
             f"it, and answer 202. The browser reads the job until it ends."
         )
+    await units.return_the_connection(on)
     bound = asyncio.timeout(seconds)
     try:
         async with bound:
@@ -150,7 +155,8 @@ def beside[T](work: Coroutine[Any, Any, T], name: str, *, within: float) -> asyn
     `WaitTimedOut`. The task ends with the result of `work`. A request does not await it: a
     request that awaits it waits as long as the work.
 
-    It acts as the actor the caller acts as. `log.beside_failed` names a failure, and
+    It acts as the actor the caller acts as, in a unit of work of its own, named
+    `beside <name>`. `log.beside_failed` names a failure, and
     `log.beside_cancelled` a cancellation, before the task is done for anything that awaits it.
     `cancel_beside` cancels it at shutdown. Raises `ValueError` on a bound that is not a positive
     number of seconds, and `BesideOutlastsTheBudget` when `within` is not under
@@ -167,13 +173,16 @@ def beside[T](work: Coroutine[Any, Any, T], name: str, *, within: float) -> asyn
             f"ends within {REQUEST_BUDGET_SECONDS} s. Make work that may take longer a job in "
             f"app/jobs.py, which the worker process runs."
         )
-    return _started(
+    task = _started(
         _bounded(work, name, within),
         name,
+        unit=f"beside {name}",
         in_a_request=False,
         failed=log.beside_failed,
         cancelled=log.beside_cancelled,
     )
+    task.add_done_callback(lambda _: work.close())
+    return task
 
 
 async def _bounded[T](work: Coroutine[Any, Any, T], name: str, within: float) -> T:
@@ -194,12 +203,18 @@ class SharedWork[K, T]:
     Each run is in a request, whoever starts it: a `waiting` in it has a bound under
     `REQUEST_BUDGET_SECONDS`. Each caller that joins a run gets the result of the work that the
     first caller started, in the context of the first caller: its actor, its request id and its
-    trace. The
-    key names everything the result depends on, such as the tenant, the actor and the arguments.
+    trace. The key names everything the result depends on, such as the tenant, the actor and the
+    arguments.
+
+    Each run is a unit of work of its own, named `shared <name>`, and a caller gives its
+    connection back before it joins. With `in_the_callers_unit`, each run reads in the unit of
+    work of the caller that starts it, and a caller keeps its connection. Use it only for work
+    that the callers of one unit share, as a turn of a loader.
     """
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, *, in_the_callers_unit: bool = False) -> None:
         self._name: Final = name
+        self._in_the_callers_unit: Final = in_the_callers_unit
         self._runs: Final[dict[K, _Run[T]]] = {}
 
     async def joined(self, key: K, start: Callable[[], Coroutine[Any, Any, T]]) -> T:
@@ -211,8 +226,11 @@ class SharedWork[K, T]:
         starts another run. A failure raises in each caller that awaits the run.
         `log.shared_failed` names each failure, and `log.shared_cancelled` a cancellation.
         `cancel_beside` cancels a run at shutdown. Raises `RuntimeError` when the task of a run
-        joins its own key, which would wait for ever.
+        joins its own key, which would wait for ever, and `HeldAcrossAWait` inside a block of a
+        unit of work, unless the run is in the caller's unit.
         """
+        if not self._in_the_callers_unit:
+            await units.return_the_connection(f"a run of {self._name}")
         run = self._runs.get(key)
         if run is None:
             run = self._new_run(key, start)
@@ -232,6 +250,7 @@ class SharedWork[K, T]:
             _started(
                 start(),
                 self._name,
+                unit=None if self._in_the_callers_unit else f"shared {self._name}",
                 in_a_request=True,
                 failed=log.shared_failed,
                 cancelled=log.shared_cancelled,
@@ -268,20 +287,24 @@ def _started[T](
     work: Coroutine[Any, Any, T],
     name: str,
     *,
+    unit: str | None,
     in_a_request: bool,
     failed: Callable[[str, BaseException], None],
     cancelled: Callable[[str], None],
 ) -> asyncio.Task[T]:
+    """`work` as a task named `name`: a unit of work of its own named `unit`, or in the unit of
+    the caller when `unit` is `None`. `work` is closed when the task ends, so work that a cancel
+    stopped before it started is not reported as never awaited."""
     context = copy_context()
     _ = context.run(_IN_A_REQUEST.set, in_a_request)
     _ = context.run(_IN_A_PART.set, False)
-    if in_a_request:
-        _ = context.run(_SHARED.set, True)
     if not in_a_request:
         _ = context.run(_BESIDE.set, True)
-    task = asyncio.get_running_loop().create_task(work, name=name, context=context)
+    run = work if unit is None else units.within(work, unit)
+    task = asyncio.get_running_loop().create_task(run, name=name, context=context)
     _STARTED.add(task)
     task.add_done_callback(lambda _: _ended(task, failed, cancelled))
+    task.add_done_callback(lambda _: work.close())
     return task
 
 

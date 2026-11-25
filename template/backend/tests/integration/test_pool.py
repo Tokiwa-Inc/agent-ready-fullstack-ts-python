@@ -1,22 +1,26 @@
 """The pool: it is sized from the connection budget, every wait on Postgres has a bound that
-raises, a connection the server refuses or ends is a refusal of one unit of work, and its
-connections can be counted."""
+raises, a connection the server refuses or ends is a refusal of one unit of work, its
+connections can be counted, it names who holds each one, and a unit of work that holds one
+never waits for a second."""
 
 import asyncio
 import contextlib
 import math
 import time
 from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 from uuid import uuid4
 
 import pytest
 
+from app import log
 from app.audit_events import acting_as
 from app.deployment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, STATEMENT_TIMEOUT_ENV
 from app.identity.shared import SENTINEL_TENANT
 from app.jobs import kinds
-from app.store import Connections
+from app.models import CreateTaskBody
+from app.store import Connections, units
 from app.store.acting import SET_ACTING, SET_TENANT_AND_ACTING
 from app.store.budget import Draws, OverBudget
 from app.store.conn import SCHEMA_ENV
@@ -25,31 +29,38 @@ from app.store.pg import (
     AcquireTimedOut,
     ConnectionLost,
     ConnectionRefused,
+    Pool,
     PostgresDatabase,
 )
 from app.store.timeouts import TIMEOUTS, Timeouts
+from app.store.units import Need
 from app.wiring import build
 from tests.clock import elapse
+from tests.conftest import Logged
 from tests.event_loop import Reported, hold_the_event_loop
 from tests.integration.conftest import THE_SUITE, Provisioned, connect, end_session
 from tests.pages import every_task
 
 SHORT = 0.2
 
+TENANT = "acme"
+
 Bounded = Callable[[Timeouts], PostgresDatabase]
+
+Sized = Callable[[int, Timeouts], PostgresDatabase]
 
 
 @pytest.fixture
-async def one_connection_under(provisioned: Provisioned) -> AsyncIterator[Bounded]:
-    """Builds a pool of one connection under the bounds a test passes, and closes every pool it
-    built. A test passes a short bound only for the wait it tests."""
+async def sized(provisioned: Provisioned) -> AsyncIterator[Sized]:
+    """Builds a pool of the connections and under the bounds a test passes, and closes every
+    pool it built. A test passes a short bound only for the wait it tests."""
     opened: list[PostgresDatabase] = []
 
-    def bounded(timeouts: Timeouts) -> PostgresDatabase:
+    def bounded(size: int, timeouts: Timeouts) -> PostgresDatabase:
         database = PostgresDatabase(
             dsn=provisioned.app_dsn,
             schema=provisioned.schema,
-            draws=Draws(instances=1, in_process={}, outside={}, pool=1),
+            draws=Draws(instances=1, in_process={}, outside={}, pool=size),
             kinds=kinds,
             timeouts=timeouts,
         )
@@ -63,8 +74,17 @@ async def one_connection_under(provisioned: Provisioned) -> AsyncIterator[Bounde
 
 
 @pytest.fixture
+def one_connection_under(sized: Sized) -> Bounded:
+    return lambda timeouts: sized(1, timeouts)
+
+
+@pytest.fixture
 def one_connection(one_connection_under: Bounded) -> PostgresDatabase:
     return one_connection_under(TIMEOUTS)
+
+
+def a_unit(route: str, *, reads_a_snapshot: bool = True) -> AbstractAsyncContextManager[units.Unit]:
+    return units.unit(lambda: route, reads_a_snapshot=reads_a_snapshot)
 
 
 def driver() -> Any:
@@ -128,19 +148,15 @@ async def test_a_request_that_finds_every_connection_in_use_waits_then_raises(
     database = one_connection_under(Timeouts(acquire=SHORT))
     timed: list[float] = []
     database.time_waits(timed.append)
-    pool = await database.pool()
-    held = await pool.acquire(timeout=TIMEOUTS.acquire)
 
-    try:
+    async with database.connection():
         started = time.monotonic()
         with pytest.raises(AcquireTimedOut, match="all 1 stayed in use"):
             await asyncio.wait_for(database.check(), timeout=TIMEOUTS.acquire / 2)
         waited = time.monotonic() - started
-    finally:
-        await pool.release(held)
 
     assert waited >= SHORT / 2
-    [timed_out] = timed
+    [_, timed_out] = timed
     assert SHORT / 2 <= timed_out <= waited
 
 
@@ -244,13 +260,14 @@ async def test_the_pool_takes_what_remains_of_the_process_s_share_of_the_server(
         kinds=kinds,
     )
     try:
-        pool = await database.pool()
+        await database.check()
         budget = database.budget()
+        opened = database.connections()
     finally:
         await database.close()
 
     assert budget.pool == (most - reserved - 1) // 2 - 3
-    assert pool.get_max_size() == budget.pool
+    assert opened.max_size == budget.pool
 
 
 async def test_draws_the_server_cannot_hold_refuse_to_open(provisioned: Provisioned) -> None:
@@ -362,3 +379,109 @@ async def test_a_transaction_whose_connection_ends_between_statements_writes_not
                 await conn.execute("SELECT 1")
 
     assert await every_task(one_connection.store(SENTINEL_TENANT)) == []
+
+
+async def test_as_many_units_as_the_pool_lends_each_read_then_write_and_none_waits_for_a_second(
+    sized: Sized,
+) -> None:
+    """The pool locking that a unit of work prevents. Each unit reads its snapshot, and every
+    unit holds a connection at once. Then each writes through a store call. Before a unit held
+    one connection, the write took a second, and each unit waited for it until `AcquireTimedOut`.
+    """
+    at_once = 3
+    database = sized(at_once, Timeouts(acquire=SHORT))
+    each_read = asyncio.Barrier(at_once)
+
+    async def reads_then_writes(n: int) -> None:
+        async with a_unit("GET /screenshot"):
+            async with database.reading(TENANT) as conn:
+                _ = await conn.fetchval("SELECT count(*) FROM tasks")
+            _ = await each_read.wait()
+            with acting_as(THE_SUITE):
+                _ = await database.store(TENANT).create(CreateTaskBody(title=f"task {n}"))
+
+    async with asyncio.timeout(TIMEOUTS.acquire), asyncio.TaskGroup() as group:
+        for n in range(at_once):
+            _ = group.create_task(reads_then_writes(n))
+
+    async with database.reading(TENANT) as conn:
+        assert await conn.fetchval("SELECT count(*) FROM tasks") == at_once
+
+
+async def test_a_wait_that_finds_no_connection_names_each_holder_of_the_pool(
+    sized: Sized, logged: Logged
+) -> None:
+    log.configure(None)
+    database = sized(1, Timeouts(acquire=SHORT))
+    holding, done = asyncio.Event(), asyncio.Event()
+
+    async def holds() -> None:
+        async with a_unit("GET /holds"), database.reading(TENANT) as conn:
+            _ = await conn.fetchval("SELECT 1")
+            holding.set()
+            _ = await done.wait()
+
+    async with asyncio.TaskGroup() as group:
+        _ = group.create_task(holds())
+        _ = await holding.wait()
+        with pytest.raises(AcquireTimedOut):
+            await database.check()
+        done.set()
+
+    [timed_out] = [one for one in logged() if one["message"] == "acquire timed out"]
+    [holder] = timed_out["holders"]
+    assert holder["route"] == "GET /holds"
+    assert holder["code.function.name"].endswith("<locals>.holds")
+    assert holder["held_ms"] >= SHORT * 1000 / 2
+    assert holder["idle_ms"] is None
+    assert (timed_out["pool"], timed_out["releasing"], timed_out["opening"]) == (
+        database.schema,
+        0,
+        0,
+    )
+
+
+async def test_a_connection_held_past_its_bound_is_named_while_it_is_held(
+    sized: Sized, logged: Logged
+) -> None:
+    log.configure(None)
+    database = sized(1, Timeouts(held=SHORT))
+    used: list[float] = []
+    database.time_uses(used.append)
+
+    async with a_unit("POST /holds", reads_a_snapshot=False):
+        for _ in range(2):
+            async with database.lent() as conn:
+                _ = await conn.fetchval("SELECT 1")
+        await elapse(SHORT * 2)
+        named = [one for one in logged() if one["message"] == "connection held"]
+
+    [held] = named
+    assert (held["route"], held["pool"]) == ("POST /holds", database.schema)
+    assert held["held_ms"] >= SHORT * 1000
+    assert held["idle_ms"] is not None
+    [use] = used
+    assert use >= SHORT * 2
+
+
+async def test_a_unit_that_asks_one_pool_for_a_second_connection_is_refused(
+    provisioned: Provisioned,
+) -> None:
+    pool = Pool(
+        dsn=provisioned.app_dsn,
+        schema=provisioned.schema,
+        draws=Draws(instances=1, in_process={}, outside={}, pool=2),
+        min_size=1,
+        timeouts=TIMEOUTS,
+    )
+    try:
+        async with (
+            a_unit("GET /twice"),
+            units.block("one", pool, Need("bare"), enforced=True) as conn,
+        ):
+            _ = await conn.fetchval("SELECT 1")
+            with pytest.raises(RuntimeError, match="more than 1 connection"):
+                async with units.block("two", pool, Need("bare"), enforced=True):
+                    pass
+    finally:
+        await pool.close()

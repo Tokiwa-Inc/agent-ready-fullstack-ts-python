@@ -345,6 +345,7 @@ requests, and an unset one keeps the value `Timeouts` ships with:
 | `DATABASE_STATEMENT_TIMEOUT` | one statement | 5 |
 | `DATABASE_IDLE_IN_TRANSACTION_TIMEOUT` | a transaction left open with nothing sent | 10 |
 | `DATABASE_ACQUIRE_TIMEOUT` | the wait for a connection | 5 |
+| `DATABASE_HELD_REPORTED_AFTER` | a hold of a connection before `connection held` names it | 2 |
 
 Each wait in a request has a bound under the request budget, `REQUEST_BUDGET_SECONDS` in
 `app/waits.py`. So the process refuses to start when an answer (`DATABASE_STATEMENT_TIMEOUT` plus
@@ -398,6 +399,29 @@ because recording it would wait for a connection too.
 [adr/template/0022](adr/template/0022-the-connections-of-every-process-fit-inside-max-connections.md)
 says why.
 
+**Each unit of work holds one connection.** A request, an attempt of a job, a run of shared work
+and a task beside the requests each hold at most one, from their first use of the database until
+they end, the response starts, or they wait through `app.waits.waiting`. The session check, the
+snapshot and the request event of one request share it. So in a burst, each request waits for a
+connection, and the burst never locks the pool. Size the pool for the units that run at once.
+[adr/template/0034](adr/template/0034-a-unit-of-work-holds-one-connection.md)
+says why.
+
+The log names who holds the pool:
+
+- `connection held` names a unit that still holds a connection `Timeouts.held` after it took it,
+  `DATABASE_HELD_REPORTED_AFTER`, 2 seconds as shipped: its `route`, the code of its latest block,
+  `held_ms`, and `idle_ms`, the time since that block ended.
+- `acquire timed out` comes before each `AcquireTimedOut`. It names each holder in `holders`, and
+  counts the connections that go back to the pool in `releasing` and the ones that open in
+  `opening`.
+
+**Measure before you enforce.** A project whose code took a second connection inside a unit gets
+`BlockInsideABlock`, a `500`, from the first request that does so. `UNIT_OF_WORK_MODE=evaluate`
+lends that block a second connection instead, keeps the connection across a wait inside a block,
+and writes `unit of work would refuse`, which names the route and the code. Run `evaluate` until
+the line stops, fix each place it names, then unset the variable. `enforce` is the default.
+
 ## The worker
 
 Work that may outlast the request budget is a job. A route asks for it and answers `202`, and the
@@ -414,7 +438,8 @@ says why.
   open. On Cloud Run, instance-based billing. The web process no longer needs it.
 - **Give the worker the telemetry settings, with a service name of its own.** With
   `OTEL_EXPORTER_OTLP_ENDPOINT`, it reports `db.client.connection.count`,
-  `db.client.connection.wait_time` and `asyncio.event_loop.delay` under `OTEL_SERVICE_NAME`. It
+  `db.client.connection.wait_time`, `db.client.connection.use_time` and
+  `asyncio.event_loop.delay` under `OTEL_SERVICE_NAME`. It
   starts no trace. Each tick of its event loop adds one to the count of the delay. The count stops
   when the worker stops, or when something holds its event loop. Alert when the count has not
   risen for ten minutes.
@@ -586,6 +611,9 @@ backend spells its own way (`http_server_request_duration_seconds` in Prometheus
 `db.client.connection.count` reports the pool's connections by state (`used`, `idle`), and
 `db.client.connection.max` reports the most it will open. Used near the maximum means requests
 are waiting for a connection, and `AcquireTimedOut` in the log follows.
+`db.client.connection.use_time` reports how long each connection was lent, in seconds: a unit of
+work holds one from its first block until it gives it back. A p99 near `DATABASE_ACQUIRE_TIMEOUT`
+names units that hold the pool while others wait. `connection held` names each one.
 `db.client.connection.wait_time` reports how long each wait for a connection took, in seconds:
 the waits that ended in a connection, and the ones that ended in `AcquireTimedOut`. Each wait
 includes one round trip to Postgres. A p95 near that round trip means requests do not queue for

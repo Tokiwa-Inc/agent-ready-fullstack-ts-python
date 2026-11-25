@@ -10,8 +10,9 @@ with `x-part`, and the frontend sends only those paths in a group.
 
 **Each part is a request of its own, in this process.** It passes every middleware the app has,
 so it is admitted, recorded, logged and bounded as it would be alone. It carries the credential
-and the request id of its group. It takes its own connection and gives it back, so a group holds
-at most `part_concurrency` connections, and none between parts.
+and the request id of its group. It is a unit of work of its own, which takes its own connection
+and gives it back. The group gives its own connection back before its parts start. So a group
+holds at most `part_concurrency` connections, and none between parts.
 
 **A part that cannot answer in its group leaves it**, and the client sends it again, alone: a part
 past `part_bound_seconds`, a path that is not a part, a part past `max_parts`, and a part whose
@@ -34,6 +35,7 @@ from starlette.types import Message, Scope
 from app import log, response_limits, waits
 from app.models import AnsweredPart, LeftBecause, LeftPart
 from app.refusal import GroupTooLarge
+from app.store import units
 
 _X_PART: Final = "x-part"
 
@@ -107,6 +109,7 @@ async def answer(request: Request, paths: Sequence[str]) -> Response:
     if sum(map(len, _ENVELOPE)) + len(paths) * _LEFT_AT_MOST > ceiling:
         raise GroupTooLarge
     response_limits.allow(request, max_bytes=ceiling, reason=GROUP_REASON)
+    await units.return_the_connection("the parts of a group of reads")
     at_once = asyncio.Semaphore(limits.part_concurrency)
     async with asyncio.TaskGroup() as group:
         tasks = [

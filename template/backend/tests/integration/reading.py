@@ -4,8 +4,8 @@ request does on its pooled connections. `tests/integration/test_routes_read_page
 
 import re
 import traceback
-from collections.abc import AsyncGenerator, Generator, Mapping
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -24,7 +24,8 @@ from app.store import Database
 from app.store.acting import SET_ACTING, SET_TENANT_AND_ACTING
 from app.store.ddl import TENANT_TABLES
 from app.store.jobs import Kinds
-from app.store.pg import PostgresDatabase
+from app.store.pg import Pool, PostgresDatabase
+from app.store.units import Holder
 from tests.integration.conftest import ONE_PROCESS, Provisioned
 from tests.integration.filled import filled, reader
 from tests.jobs_contract import contract_kinds
@@ -85,6 +86,7 @@ class Counted:
     """A connection that adds each statement, and the rows that each read returns, to `count`."""
 
     def __init__(self, conn: Any, count: Count) -> None:
+        self.conn: Any = conn
         self._conn: Any = conn
         self._count: Count = count
 
@@ -128,25 +130,25 @@ def counting(monkeypatch: pytest.MonkeyPatch) -> Count:
     and the tasks and shared work it starts. A loop of the process, an attempt of a job and work
     beside the requests are not counted, even when they run during the request."""
     counted = Count()
-    unmeasured = PostgresDatabase.lent
+    taken, given_back = Pool.taken, Pool.given_back
 
-    @asynccontextmanager
-    async def lent(self: PostgresDatabase) -> AsyncGenerator[Any]:
-        lent: AbstractAsyncContextManager[Any] = unmeasured(self)
+    async def counted_taken(self: Pool, holder: Holder) -> Any:
+        conn = await taken(self, holder)
         if not _SERVING.get() or waits.started_beside():
-            async with lent as conn:
-                yield conn
-            return
-        async with lent as conn:
-            counted.connections += 1
-            counted.held += 1
-            counted.most_held = max(counted.most_held, counted.held)
-            try:
-                yield Counted(conn, counted)
-            finally:
-                counted.held -= 1
+            return conn
+        counted.connections += 1
+        counted.held += 1
+        counted.most_held = max(counted.most_held, counted.held)
+        return Counted(conn, counted)
 
-    monkeypatch.setattr(PostgresDatabase, "lent", lent)
+    async def counted_given_back(self: Pool, conn: Any, holder: Holder) -> None:
+        if isinstance(conn, Counted):
+            counted.held -= 1
+            conn = conn.conn
+        await given_back(self, conn, holder)
+
+    monkeypatch.setattr(Pool, "taken", counted_taken)
+    monkeypatch.setattr(Pool, "given_back", counted_given_back)
     return counted
 
 

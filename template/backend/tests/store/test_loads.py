@@ -1,5 +1,5 @@
 """A loader reads the keys that one turn asks for in one statement for each set read, and every
-set read of a turn in one unit of work. `docs/adr/template/0032`."""
+set read of a turn in one block. `docs/adr/template/0032`."""
 
 import asyncio
 from collections.abc import AsyncGenerator, Mapping, Sequence

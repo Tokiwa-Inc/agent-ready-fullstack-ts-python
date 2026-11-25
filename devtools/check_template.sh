@@ -930,6 +930,8 @@ need backend/tests/integration/filled.py
 need backend/tests/integration/test_routes_read_pages.py "It holds every GET route to a page for each read (docs/adr/template/0026)"
 need backend/tests/integration/test_routes_read_a_fixed_count.py "It holds the reads of every GET route to a count that does not grow with its rows (docs/adr/template/0032), and to each statement once (0033)"
 need backend/tests/integration/test_snapshots_on_postgres.py "It holds a snapshot to READ ONLY and REPEATABLE READ (docs/adr/template/0033)"
+need backend/tests/store/test_units.py "It holds each unit of work to one connection (docs/adr/template/0034)"
+need backend/tests/waits/test_the_only_door.py "It holds each call to a system outside the process to app.waits.waiting (docs/adr/template/0034)"
 need frontend/tests/read-budgets.ts
 need frontend/tests/signed-in.ts
 need backend/app/lifespan.py
@@ -994,7 +996,8 @@ need_only f docs/adr/template \
     0030-server-events-merge-and-share-a-read-budget.md \
     0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md \
     0032-a-request-s-reads-do-not-grow-with-its-rows.md \
-    0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md
+    0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md \
+    0034-a-unit-of-work-holds-one-connection.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."

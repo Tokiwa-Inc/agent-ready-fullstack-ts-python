@@ -1,8 +1,9 @@
-"""A snapshot on Postgres: one transaction, READ ONLY and REPEATABLE READ, that sees no write
-committed after it opened, except one the request made through `scoped`.
-`docs/adr/template/0033`."""
+"""A snapshot on Postgres: one transaction, READ ONLY and REPEATABLE READ, on the one connection
+of a GET request's unit of work, that sees no write committed after it opened, except one the
+request made itself. `docs/adr/template/0033` and `0034`."""
 
 import asyncio
+from contextlib import AbstractAsyncContextManager
 from dataclasses import replace
 from typing import Any, Final
 
@@ -17,10 +18,9 @@ from app.jobs import kinds
 from app.models import CreateTaskBody
 from app.reads import PART
 from app.routes import public
-from app.store import Database
+from app.store import Database, units
 from app.store.acting import SET_TENANT_AND_ACTING, acting
 from app.store.pg import PostgresDatabase
-from app.store.snapshots import snapshotted
 from app.store.timeouts import Timeouts
 from tests.event_loop import Reported
 from tests.integration.conftest import ONE_PROCESS, THE_SUITE, Provisioned
@@ -41,8 +41,12 @@ GROUPS: Final = 5
 OVERRUNS: Final = "SELECT pg_sleep(1)"
 
 
-async def counted(database: Any, query: str = COUNT) -> int:
-    async with database.reading(TENANT) as conn:
+def a_get() -> AbstractAsyncContextManager[units.Unit]:
+    return units.unit(lambda: "GET /tasks", reads_a_snapshot=True)
+
+
+async def counted(database: Any, query: str = COUNT, tenant: str = TENANT) -> int:
+    async with database.reading(tenant) as conn:
         tasks: int = await conn.fetchval(query)
     return tasks
 
@@ -66,11 +70,11 @@ async def test_a_snapshot_sees_no_write_that_another_connection_commits_after_it
     database: Database,
 ) -> None:
     await created(database, "before")
-    async with snapshotted() as scope:
+    async with a_get() as unit:
         before = await counted(database)
         await created_elsewhere(database)
         again = await counted(database, COUNT_AGAIN)
-        await scope.end()
+        await unit.give_back()
         after = await counted(database)
 
     assert (before, again, after) == (1, 1, 2)
@@ -79,7 +83,7 @@ async def test_a_snapshot_sees_no_write_that_another_connection_commits_after_it
 async def test_a_read_in_a_snapshot_sees_a_write_that_the_request_made_through_scoped(
     database: Database,
 ) -> None:
-    async with snapshotted():
+    async with a_get():
         before = await counted(database)
         await created(database, "in the request")
         after = await counted(database)
@@ -88,7 +92,7 @@ async def test_a_read_in_a_snapshot_sees_a_write_that_the_request_made_through_s
 
 
 async def test_a_write_in_a_snapshot_is_refused(database: Any) -> None:
-    async with snapshotted():
+    async with a_get():
         with pytest.raises(asyncpg.exceptions.ReadOnlySQLTransactionError):
             async with database.reading(TENANT) as conn:
                 await conn.execute(INSERT, TENANT, "refused")
@@ -101,35 +105,42 @@ async def test_a_write_through_reading_outside_a_get_request_is_refused(database
             await conn.execute(INSERT, TENANT, "refused")
 
 
-async def test_a_write_on_a_connection_of_its_own_is_seen_after_written(database: Any) -> None:
-    async with snapshotted():
+async def test_a_write_on_the_connection_of_lent_ends_the_snapshot_so_the_next_read_sees_it(
+    database: Any,
+) -> None:
+    async with a_get():
         before = await counted(database)
         with acting_as(THE_SUITE):
             async with database.connection() as conn, conn.transaction():
                 await conn.execute(SET_TENANT_AND_ACTING, TENANT, *acting(THE_SUITE, None, None))
-                await conn.execute(INSERT, TENANT, "on a connection of its own")
-        unseen = await counted(database)
-        await database.written(TENANT)
+                await conn.execute(INSERT, TENANT, "on the connection of lent")
         seen = await counted(database)
 
-    assert (before, unseen, seen) == (0, 0, 1)
+    assert (before, seen) == (0, 1)
 
 
-async def test_a_request_reads_more_tenants_than_its_pool_holds(provisioned: Provisioned) -> None:
+async def test_a_request_reads_each_tenant_on_its_one_connection_under_that_tenant_s_policy(
+    provisioned: Provisioned,
+) -> None:
     database = PostgresDatabase(
         dsn=provisioned.app_dsn,
         schema=provisioned.schema,
-        draws=replace(ONE_PROCESS, pool=2),
+        draws=replace(ONE_PROCESS, pool=1),
         kinds=kinds,
         timeouts=Timeouts(acquire=1.0),
     )
     try:
-        async with snapshotted():
-            for tenant in ("acme", "beta", "gamma", "beta", "acme"):
-                async with database.reading(tenant) as conn:
-                    assert await conn.fetchval(COUNT) == 0
+        await created(database, "of acme")
+        async with a_get():
+            counts = [
+                await counted(database, COUNT_AGAIN if n > 1 else COUNT, tenant)
+                for n, tenant in enumerate(("acme", "beta", "acme", "gamma", "beta"))
+            ]
+            assert database.connections().used == 1
     finally:
         await database.close()
+
+    assert counts == [1, 0, 1, 0, 0]
 
 
 async def test_a_part_past_its_bound_ends_its_snapshot_before_its_connection_goes_back(

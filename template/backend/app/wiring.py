@@ -33,6 +33,7 @@ from app.deployment import (
     ADMISSION_STREAMS_ENV,
     BUNDLE_ENV,
     DATABASE_URL_ENV,
+    HELD_REPORTED_AFTER_ENV,
     IDLE_IN_TRANSACTION_TIMEOUT_ENV,
     INSTANCES_ENV,
     NEEDS_THE_ENDPOINT,
@@ -52,6 +53,7 @@ from app.deployment import (
     STATEMENT_TIMEOUT_ENV,
     TIMEOUTS_ENV,
     TRUST_INBOUND_CONTEXT_ENV,
+    UNIT_OF_WORK_MODE_ENV,
     in_development,
     stated,
 )
@@ -113,6 +115,11 @@ class AdmissionMisconfigured(RuntimeError):
 class ReadsMisconfigured(RuntimeError):
     """A variable of `GET /reads` is set to something this process will not run with, or its
     numbers do not fit the request budget or the burst of admission, so it refuses to start."""
+
+
+class UnitOfWorkMisconfigured(RuntimeError):
+    """`UNIT_OF_WORK_MODE` is set to something other than `enforce` or `evaluate`, or is set
+    without `DATABASE_URL`, so the process refuses to start."""
 
 
 class InstancesMisconfigured(RuntimeError):
@@ -254,6 +261,7 @@ def build_timeouts(*, serves_requests: bool = True) -> Timeouts:
         statement=_seconds(STATEMENT_TIMEOUT_ENV, TIMEOUTS.statement),
         idle_in_transaction=_seconds(IDLE_IN_TRANSACTION_TIMEOUT_ENV, TIMEOUTS.idle_in_transaction),
         acquire=_seconds(ACQUIRE_TIMEOUT_ENV, TIMEOUTS.acquire),
+        held=_seconds(HELD_REPORTED_AFTER_ENV, TIMEOUTS.held),
     )
     if not serves_requests:
         return timeouts
@@ -455,6 +463,11 @@ def build(*, serves_requests: bool = True) -> Database:
                 f"{INSTANCES_ENV} set and {DATABASE_URL_ENV} unset: the in-memory substrate "
                 f"holds no connection. Unset it, or set {DATABASE_URL_ENV}."
             )
+        if stated(UNIT_OF_WORK_MODE_ENV):
+            raise UnitOfWorkMisconfigured(
+                f"{UNIT_OF_WORK_MODE_ENV} set and {DATABASE_URL_ENV} unset: the in-memory "
+                f"substrate lends no connection. Unset it, or set {DATABASE_URL_ENV}."
+            )
         return MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=jobs.kinds)
     return PostgresDatabase(
         dsn=dsn,
@@ -462,7 +475,21 @@ def build(*, serves_requests: bool = True) -> Database:
         draws=build_draws(),
         kinds=jobs.kinds,
         timeouts=build_timeouts(serves_requests=serves_requests),
+        enforced=build_unit_of_work_enforced(),
     )
+
+
+def build_unit_of_work_enforced() -> bool:
+    """Whether each unit of work refuses what it cannot run on its one connection:
+    `UNIT_OF_WORK_MODE`, `enforce` when unset. Raises `UnitOfWorkMisconfigured` on a mode other
+    than `enforce` or `evaluate`. `docs/adr/template/0034`."""
+    mode = stated(UNIT_OF_WORK_MODE_ENV) or ENFORCE
+    if mode not in (ENFORCE, EVALUATE):
+        raise UnitOfWorkMisconfigured(
+            f"{UNIT_OF_WORK_MODE_ENV}={mode!r}: say {ENFORCE!r} to refuse a second connection in "
+            f"a unit of work, or {EVALUATE!r} to report it and lend it."
+        )
+    return mode == ENFORCE
 
 
 def build_response_limits() -> response_limits.Limits:

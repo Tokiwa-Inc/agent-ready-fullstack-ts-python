@@ -61,7 +61,7 @@ covered a full pool, not a server that refuses.
 - **A request that the database does not serve is refused, and only that request.** The pool
   raises `AcquireTimedOut` when no connection comes within `Timeouts.acquire`, and
   `ConnectionRefused` when a new one does not open: the server refuses it, or nothing answers at
-  its address. It raises `ConnectionLost` when a lent connection ends during the unit of work,
+  its address. It raises `ConnectionLost` when a connection ends while a unit of work holds it,
   as at a restart or a failover. asyncpg reports that end in several ways, so the pool reads
   whether the connection ended, and not the type of the error. Each is `DatabaseUnavailable` in
   `app/store/__init__.py`. `app/main.py` answers `DatabaseUnavailable` with `NoConnectionFree`
@@ -74,7 +74,9 @@ covered a full pool, not a server that refuses.
 - **A request that the database does not serve records no request event.** Recording it would
   wait for the database too. [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) says so.
 - **The same holds when the database does not serve the request event.** Each request a
-  principal makes takes a second connection, to record its event, after its route has answered.
+  principal makes records its event after its route has answered, on the connection of its unit
+  of work ([0034](0034-a-unit-of-work-holds-one-connection.md)). A
+  request whose route used no connection takes one for its event.
   `RecordsRequests` in `app/request_events.py` sends the same `503` in place of the route's
   response. `test_a_request_whose_event_got_no_connection_is_refused_with_a_time_to_ask_again`
   holds this.
@@ -115,7 +117,10 @@ covered a full pool, not a server that refuses.
   instances hold.
 - A `503` from a database that is unavailable and a `503` from the platform look the same to the
   client. The `detail` and the line `database unavailable` tell them apart.
-- A connection that ends during `COMMIT` leaves the outcome unknown. So a unit of work that
-  raised `ConnectionLost` may have committed, and only an idempotent unit runs again.
+- A connection that ends during `COMMIT` leaves the outcome unknown. So a transaction of a unit of
+  work that raised `ConnectionLost` may have committed, and only an idempotent unit runs again.
+- A unit of work holds at most one connection
+  ([0034](0034-a-unit-of-work-holds-one-connection.md)). So the pool
+  bounds the requests and attempts that use the database at once, and no burst locks it.
 - A request that wrote rows and then was not served keeps the row events of its writes. Only
   its request event is missing. Its client gets a `503`, and a retry of a create can create twice.
