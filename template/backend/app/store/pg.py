@@ -86,7 +86,7 @@ from app.store.jobs import (
 )
 from app.store.loads import Loader, loader_of
 from app.store.migrate import check, schema_version
-from app.store.pages import fetch_page
+from app.store.paging import fetch_page
 from app.store.timeouts import TIMEOUTS, Timeouts, milliseconds
 
 _TASKS = "SELECT id, title, done, seq FROM tasks"

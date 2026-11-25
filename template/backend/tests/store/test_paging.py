@@ -3,7 +3,7 @@
 
 import pytest
 
-from app.store.pages import UnorderedPage, fetch_page
+from app.store.paging import UnorderedPage, fetch_page
 
 
 @pytest.mark.parametrize("order", ["seq, id", "seq ASC", "lower(title)", "seq; DROP TABLE x"])

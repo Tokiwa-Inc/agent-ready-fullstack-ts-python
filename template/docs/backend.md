@@ -219,7 +219,7 @@ backend/
   satisfied and Postgres scans.
 - **A store read answers one page.** A list takes `after` and answers at most `PAGE_MAX` rows
   and `next`. On Postgres a page also stops at `PAGE_BYTES`, and always holds its first row. Read
-  it with `fetch_page` from `app/store/pages.py`: give it a `SELECT` with no `ORDER BY` and no
+  it with `fetch_page` from `app/store/paging.py`: give it a `SELECT` with no `ORDER BY` and no
   `LIMIT`, and one column whose values are unique to order by. Its SQL reads `PAGE_MAX + 1` rows on
   an index that leads with `tenant_id` and ends with that column, such as `tasks_seq_idx`. A task cursor names a task by
   its id, never by `seq`. The audit events, which no route serves, page by `seq`. A task cursor

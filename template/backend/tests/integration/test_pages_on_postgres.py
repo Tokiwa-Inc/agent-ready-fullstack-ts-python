@@ -10,7 +10,7 @@ import pytest
 
 from app.audit_events import acting_as
 from app.models import PAGE_MAX, CreateTaskBody
-from app.store import Database, TaskStore, pages
+from app.store import Database, TaskStore, paging
 from app.store.pg import PostgresDatabase
 from tests.pages import every_event, every_task
 from tests.store_contract import A_REQUEST, ACTOR
@@ -102,7 +102,7 @@ async def page_lengths(store: TaskStore) -> list[int]:
 async def test_a_page_stops_at_its_bytes_and_the_next_page_reads_on(
     database: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(pages, "PAGE_BYTES", 3 * WIDE)
+    monkeypatch.setattr(paging, "PAGE_BYTES", 3 * WIDE)
     store = database.store(f"paged-{uuid4().hex}")
     for n in range(7):
         await store.create(CreateTaskBody(title=f"{n}" * WIDE))
@@ -116,7 +116,7 @@ async def test_a_page_stops_at_its_bytes_and_the_next_page_reads_on(
 async def test_a_row_wider_than_a_page_is_a_page_of_its_own(
     database: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(pages, "PAGE_BYTES", WIDE // 2)
+    monkeypatch.setattr(paging, "PAGE_BYTES", WIDE // 2)
     store = database.store(f"paged-{uuid4().hex}")
     for n in range(3):
         await store.create(CreateTaskBody(title=f"{n}" * WIDE))
