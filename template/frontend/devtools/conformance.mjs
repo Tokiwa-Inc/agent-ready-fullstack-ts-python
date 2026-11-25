@@ -187,7 +187,7 @@ const EXPORTED_ARROW_HINT =
 
 const EXPORTED_NAME = /^export\s+(?:default\s+)?function\s+([A-Z]\w*)|^export\s*\{([^}]*)\}/gm;
 const FILENAME_HINT =
-  "the file name is how anything finds a component without reading it; name the file for what it exports, in kebab-case";
+  "the file name is how anything finds a component without reading it, so each exported component starts with it; stop exporting what nothing outside the file uses, give it the file's name as a prefix, or move it to its own file";
 
 const EFFECT = /\buse(?:Layout)?Effect\s*\(/g;
 const DATA_WORK = /\bawait\b|\.then\s*\(|\bfetch\s*\(/;
@@ -304,13 +304,17 @@ function exportedNames(code) {
   return found;
 }
 
+function startsWithWanted(name, wanted) {
+  const rest = name.slice(wanted.length);
+  return name.toLowerCase().startsWith(wanted) && (rest === "" || /^[A-Z0-9]/.test(rest));
+}
+
 function filenameExports(file, code) {
   if (!/\.tsx$/.test(file)) return [];
-  const exported = exportedNames(code);
   const wanted = expectedExport(file).toLowerCase();
-  const named = (entry) => /[a-z]/.test(entry.name) && entry.name.toLowerCase() === wanted;
-  if (exported.length === 0 || exported.some(named)) return [];
-  return [{ index: exported[0].index, text: exported[0].name }];
+  return exportedNames(code)
+    .filter((entry) => /[a-z]/.test(entry.name) && !startsWithWanted(entry.name, wanted))
+    .map((entry) => ({ index: entry.index, text: entry.name }));
 }
 
 function exportedArrows(_file, code) {

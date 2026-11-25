@@ -919,6 +919,26 @@ What to expect, because it is not all free:
   [adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md) says
   why.
 
+- **From 0.96.0 `filename-export` checks each exported component**, not only one. Each must start
+  with the file's name: `table.tsx` may export `Table` and `TableRow`. Before 0.96.0, a file that
+  exported one matching component passed. Other components could hide behind that one. Each
+  hidden component is now a finding. A file that exports only constants now passes. After the
+  update:
+  - `conformance:record` alone records nothing here, because the debt already names the rule.
+    Run the two commands below. The first deletes `filename-export` and each of its counts from
+    `frontend/.conformance-debt.json`. The second records the rule again. Commit the file.
+
+    ```bash
+    node -e 'const fs = require("fs"), f = "frontend/.conformance-debt.json", d = JSON.parse(fs.readFileSync(f));
+      d.rules = d.rules.filter((r) => r !== "filename-export");
+      for (const k in d.files) { delete d.files[k]["filename-export"]; if (Object.keys(d.files[k]).length === 0) delete d.files[k]; }
+      fs.writeFileSync(f, JSON.stringify(d));'
+    pnpm -C frontend conformance:record
+    ```
+  - In `docs/frontend.md`, take the template's bullet that starts "A component file is named for
+    what it exports".
+  [docs/frontend.md](frontend.md#conventions) says what the rule sees.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name
