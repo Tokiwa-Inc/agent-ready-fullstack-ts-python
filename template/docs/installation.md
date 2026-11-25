@@ -904,7 +904,7 @@ What to expect, because it is not all free:
   through `fetch_page`. After the update:
   - A Postgres test of yours that expects a full page of wide rows now gets a shorter page. Read
     the list to its end with `tests/pages.py` instead.
-  - To bound the bytes of a list of yours, read it with `fetch_page` from `app/store/pages.py`.
+  - To bound the bytes of a list of yours, read it with `fetch_page` from `app/store/paging.py`.
     Select the column you order by, and order by one column whose values are unique.
   - In `docs/backend.md`, take the template's bullet that starts "A store read answers one page".
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
@@ -938,6 +938,21 @@ What to expect, because it is not all free:
   - In `docs/frontend.md`, take the template's bullet that starts "A component file is named for
     what it exports".
   [docs/frontend.md](frontend.md#conventions) says what the rule sees.
+
+- **From 0.97.0 the store's page read is in `app/store/paging.py`**, not in `app/store/pages.py`.
+  A project can then use `app/store/pages.py` for a module of its own. `Page`,
+  `UnorderedPage` and `fetch_page` keep their names. After the update:
+  - The update deletes `backend/app/store/pages.py` and `backend/tests/store/test_pages.py`, and
+    changes the template's own imports. It deletes them even when you changed them. Before you
+    commit the update, compare each old file with its new one, and move each line you added:
+
+    ```bash
+    git show HEAD:backend/app/store/pages.py | diff - backend/app/store/paging.py
+    git show HEAD:backend/tests/store/test_pages.py | diff - backend/tests/store/test_paging.py
+    ```
+  - In each import of your own, change `app.store.pages` to `app.store.paging`, and
+    `from app.store import pages` to `from app.store import paging`. A missed import fails, and
+    names the module.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

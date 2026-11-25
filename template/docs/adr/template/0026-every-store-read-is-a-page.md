@@ -30,7 +30,7 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   `TaskPage.tasks` has `max_length=PAGE_MAX`, so `openapi.json` carries the bound as `maxItems`,
   and a route that answers more fails with a `500`.
 - **The database does the picking, in rows and in bytes.** `fetch_page` in
-  `app/store/pages.py` runs one `LIMIT` of `PAGE_MAX + 1` rows, on the index that leads with
+  `app/store/paging.py` runs one `LIMIT` of `PAGE_MAX + 1` rows, on the index that leads with
   `tenant_id` and ends with `seq`. In the same statement Postgres adds up the bytes of each row,
   `octet_length(row::text)`. It keeps each row while the running sum stays within `PAGE_BYTES`,
   1 MiB, and always the first row. A page of wide rows is then shorter. Only the rows that
