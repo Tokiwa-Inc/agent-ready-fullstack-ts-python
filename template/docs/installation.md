@@ -954,6 +954,14 @@ What to expect, because it is not all free:
     `from app.store import pages` to `from app.store import paging`. A missed import fails, and
     names the module.
 
+- **From 0.98.0 `handler-on-a-non-interactive-element` reports fewer elements.** An element
+  passes when each handler on it needs no keyboard route, and
+  [docs/frontend.md](frontend.md#conventions) says which handlers need none. The rule then reports
+  fewer findings than your conformance debt holds, and `pnpm lint:check` fails until you lower the
+  debt. Run `pnpm -C frontend lint`, and commit `frontend/.conformance-debt.json`. A container
+  that the rule still reports for a key handler is a widget: give it that widget's role, or move
+  the handler onto the control.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

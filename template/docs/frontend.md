@@ -201,6 +201,17 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   function from a context or a prop that sets state somewhere else. No check sees that copy.
   `AGENTS.md` forbids it.
 
+  `handler-on-a-non-interactive-element` reports an element whose handler a keyboard cannot
+  reach. It reads only the handlers that Biome reads. A reported element passes when each of
+  those handlers needs no keyboard route. `onLoad` and `onError` on an `img` or an `iframe`
+  answer the resource, not a person. `onFocus` and `onBlur` need no route on any element: an
+  element that cannot take focus gets a focus event only from a focused control inside it. A
+  hover handler, such as `onMouseEnter`, needs no route beside `onFocus` or `onBlur` on the same
+  element. Give the focus handler the effect of the hover handler. A click, a key handler or a
+  mouse move keeps the element reported: a container that handles keys is a widget, and says so
+  with that widget's role. A spread attribute also keeps it reported, because it can hold any
+  handler. The check finds the element with the parser that Vite ships.
+
   `@biomejs/biome` is held to one version, because a patch release can change what a nursery
   rule finds.
 - **A component file is named for what it exports**, in kebab-case: `task-list.tsx` exports

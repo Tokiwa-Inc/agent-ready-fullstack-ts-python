@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fail } from "./gate.mjs";
@@ -14,6 +15,7 @@ export const BIOME_CHECKS = [
     name: "handler-on-a-non-interactive-element",
     biome: "a11y/noNoninteractiveElementInteractions",
     hint: "a keyboard cannot reach a handler on a list item, a paragraph or a landmark. Put the handler on a button or a link, or on a primitive that is one",
+    passes: needsNoKeyboardRoute,
   },
   {
     name: "query-result-rest",
@@ -23,6 +25,35 @@ export const BIOME_CHECKS = [
 ];
 
 const TYPESCRIPT_FILE = /\.tsx?$/;
+
+const RESOURCE_EVENTS = new Set(["onLoad", "onError"]);
+const RESOURCE_ELEMENTS = new Set(["img", "iframe"]);
+const FOCUS_EVENTS = new Set(["onFocus", "onBlur"]);
+const HOVER_EVENTS = new Set(["onMouseEnter", "onMouseLeave", "onMouseOver", "onMouseOut"]);
+const HANDLERS_BIOME_READS = new Set([
+  ...RESOURCE_EVENTS,
+  ...FOCUS_EVENTS,
+  ...HOVER_EVENTS,
+  "onKeyDown",
+  "onKeyPress",
+  "onKeyUp",
+  "onClick",
+  "onContextMenu",
+  "onDblClick",
+  "onDoubleClick",
+  "onDrag",
+  "onDragEnd",
+  "onDragEnter",
+  "onDragExit",
+  "onDragLeave",
+  "onDragOver",
+  "onDragStart",
+  "onDrop",
+  "onMouseDown",
+  "onMouseMove",
+  "onMouseUp",
+]);
+const LINE_BREAK = /\r\n|\r|\n/g;
 const REPORT_BYTES = 256 * 1024 * 1024;
 
 function checkConfig(directory) {
@@ -100,16 +131,84 @@ function checkOf(diagnostic) {
   return check;
 }
 
+function offsetOf(code, { line, column }) {
+  const breaks = [...code.matchAll(LINE_BREAK)];
+  const above = breaks[line - 2];
+  const start = above === undefined ? 0 : above.index + above[0].length;
+  const text = code.slice(start, breaks[line - 1]?.index);
+  return (
+    start +
+    Array.from(text)
+      .slice(0, column - 1)
+      .join("").length
+  );
+}
+
+function openingElementAt(node, offset) {
+  if (node === null || typeof node !== "object") return null;
+  if (node.type === "JSXOpeningElement" && node.start === offset) return node;
+  for (const value of Object.values(node)) {
+    const found = openingElementAt(value, offset);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+function readTree(parseAst, file) {
+  const code = readFileSync(file, "utf8");
+  try {
+    return { code, tree: parseAst(code, { lang: "tsx" }) };
+  } catch (error) {
+    if (error.code !== "PARSE_ERROR") throw error;
+    return fail(`conformance could not parse ${file}: ${error.message}`);
+  }
+}
+
+function treesOf(parseAst) {
+  const held = new Map();
+  return (file) => {
+    if (!held.has(file)) held.set(file, readTree(parseAst, file));
+    return held.get(file);
+  };
+}
+
+function handlerPasses(element, handler, handlers) {
+  if (FOCUS_EVENTS.has(handler)) return true;
+  if (HOVER_EVENTS.has(handler)) return handlers.some((one) => FOCUS_EVENTS.has(one));
+  return RESOURCE_EVENTS.has(handler) && RESOURCE_ELEMENTS.has(element);
+}
+
+function needsNoKeyboardRoute(read, file, location) {
+  const { code, tree } = read(file);
+  const opening = openingElementAt(tree, offsetOf(code, location.start));
+  if (opening === null || opening.name.type !== "JSXIdentifier") return false;
+  if (opening.attributes.some((one) => one.type === "JSXSpreadAttribute")) return false;
+  const handlers = opening.attributes
+    .filter((one) => one.name.type === "JSXIdentifier")
+    .map((one) => one.name.name)
+    .filter((name) => HANDLERS_BIOME_READS.has(name));
+  const element = opening.name.name;
+  return handlers.length > 0 && handlers.every((one) => handlerPasses(element, one, handlers));
+}
+
+function readerFor(diagnostics) {
+  if (!diagnostics.some((one) => checkOf(one).passes !== undefined)) return null;
+  return treesOf(createRequire(import.meta.url)("vite").parseAst);
+}
+
 export function biomeViolations(files) {
   const linted = files.filter((file) => TYPESCRIPT_FILE.test(file));
   if (linted.length === 0) return [];
   const asked = new Map(linted.map((file) => [resolve(file), file]));
-  return diagnosticsOf(linted).map((diagnostic) => {
+  const diagnostics = diagnosticsOf(linted);
+  const read = readerFor(diagnostics);
+  return diagnostics.flatMap((diagnostic) => {
     const check = checkOf(diagnostic);
     const file = asked.get(resolve(diagnostic.location.path));
     if (file === undefined) {
       fail(`biome reported ${diagnostic.location.path}, which conformance did not ask about.`);
     }
+    if (check.passes?.(read, file, diagnostic.location)) return [];
     return {
       file,
       line: diagnostic.location.start.line,
