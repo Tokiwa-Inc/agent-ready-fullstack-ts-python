@@ -1,6 +1,7 @@
-import { rmSync, writeFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { gate, NO_PROJECT_RULES } from "./harness";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { delimiter } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BIOME_RULES, gate, NO_PROJECT_RULES } from "./harness";
 
 const OFFENDING_MARKUP = [
   "import { useEffect, useState } from 'react';",
@@ -84,8 +85,6 @@ const COPIED = [
   "}",
 ];
 
-const BIOME_RULES = ["handler-on-a-non-interactive-element", "query-result-rest", "react-compiler"];
-
 const CLEAN = [
   "import { useEffect } from 'react';",
   "const ICON_STROKE = 1.5;",
@@ -145,6 +144,41 @@ describe("the conformance gate on what biome finds", () => {
     const { status, rules } = scan("copied.tsx", COPIED);
     expect(rules).toEqual(BIOME_RULES);
     expect(status).toBe(1);
+  });
+
+  it("fails, and names the file, when biome cannot parse it", () => {
+    const { status, stderr } = scan("broken.tsx", ["export function Broken( {"]);
+    expect(stderr).toContain("biome could not check");
+    expect(stderr).toContain("broken.tsx");
+    expect(status).toBe(2);
+  });
+});
+
+describe("the conformance gate when biome does not answer with its report", () => {
+  beforeEach(conformance.open);
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    conformance.close();
+  });
+
+  function biomeThatPrints(stdout: string, exit: number) {
+    mkdirSync(conformance.at("bin"));
+    const script = `#!/bin/sh\nprintf '%s' '${stdout}'\necho 'biome broke' >&2\nexit ${exit}\n`;
+    writeFileSync(conformance.at("bin/biome"), script, { mode: 0o755 });
+    vi.stubEnv("PATH", `${conformance.at("bin")}${delimiter}${process.env.PATH}`);
+  }
+
+  it.each([
+    ["no output", "", 3, "biome failed (exit 3): biome broke"],
+    ["a report without diagnostics", "{}", 1, "biome failed (exit 1): biome broke"],
+    ["text after a pass", "ok", 0, "biome answered something other than its JSON report: ok"],
+    ["a report without diagnostics after a pass", "{}", 0, "its JSON report: {}"],
+  ])("fails, and says so, on %s", (_case, stdout, exit, said) => {
+    biomeThatPrints(stdout, exit);
+    const { status, stderr } = scan("good.tsx", CLEAN);
+    expect(stderr).toContain(said);
+    expect(status).toBe(2);
   });
 });
 
