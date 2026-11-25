@@ -217,6 +217,28 @@ describe("the conformance gate", () => {
   });
 });
 
+describe("the conformance gate on the name of a component file", () => {
+  beforeEach(conformance.open);
+
+  afterEach(conformance.close);
+
+  it("lets a component name its file in any case", () => {
+    const { status, rules } = scan("github-screen.tsx", [
+      "export function GitHubScreen() {",
+      "  return null;",
+      "}",
+    ]);
+    expect(rules).toEqual([]);
+    expect(status).toBe(0);
+  });
+
+  it("does not let a constant in capitals name its file", () => {
+    const { status, rules } = scan("unit.tsx", ["const UNIT = 1;", "export { UNIT };"]);
+    expect(rules).toEqual(["filename-export"]);
+    expect(status).toBe(1);
+  });
+});
+
 describe("the conformance gate where no package.json configures it", () => {
   beforeEach(conformance.open);
 
