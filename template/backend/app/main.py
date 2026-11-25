@@ -17,7 +17,7 @@ from app.refusal import (
     responses,
 )
 from app.routes import public, tenant
-from app.store import DatabaseUnavailable, loads, snapshots
+from app.store import DatabaseUnavailable, loads, units
 from app.wiring import (
     TelemetrySettings,
     build_admission,
@@ -47,7 +47,7 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
     """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant
     and of a request that the database did not serve, the admission of each actor's requests,
     the limits of `GET /reads`, the mark `app.waits.waiting` reads, the scope of loaders of each
-    request, the snapshot of each GET request, the request event, the request line and the
+    request, the request event, the unit of work of each request, the request line and the
     telemetry around each route. `create_app` and `tests.routed.routed` build with it.
     Configures the logging of the whole process."""
     log.configure(build_service_version())
@@ -67,8 +67,8 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
     response_bound.instrument(app, build_response_limits())
     waits.instrument(app)
     loads.instrument(app)
-    snapshots.instrument(app)
     request_events.instrument(app)
+    units.instrument(app)
     policy = build_admission()
     admission.instrument(app, policy)
     reads.instrument(app, build_reads(policy.limits))

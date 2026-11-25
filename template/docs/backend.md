@@ -239,23 +239,30 @@ backend/
   `asyncio.TaskGroup`. `read` is a set read: one statement that answers one value for each key it
   is handed. A fact of many rows for each key is a `GROUP BY` of the key. A key whose value this
   build cannot read answers an exception, which raises in that item only. The loader runs each set
-  read of a turn of the event loop once, in one transaction.
+  read of a turn of the event loop once, in one block.
   `tests/integration/test_routes_read_a_fixed_count.py` reads each GET route at one row and past a
   page. It fails on a route that makes more statements or takes more connections past a page,
-  and on one that holds more than one connection at once. `GROWS_WITH_ROWS` and
-  `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py` name each route that did so when
-  the project recorded them, and only shrink.
+  and on one that holds more than one connection at once. `GROWS_WITH_ROWS` in
+  `tests/integration/filled.py` names each route whose reads grew when the project recorded it,
+  and only shrinks. No list names a route that holds more than one connection.
   [adr/template/0032](adr/template/0032-a-request-s-reads-do-not-grow-with-its-rows.md) says why.
+- **A unit of work holds one connection.** Each request, attempt of a job, run of shared work and
+  task of work beside the requests is a unit of work. It holds at most one connection, and each
+  store call is a block on it. Call a system outside the process only inside `app.waits.waiting`,
+  which gives the connection back first. `tests/waits/test_the_only_door.py` holds this for each
+  client of a module that it names. A block that cannot share the transaction of the block it is
+  inside raises `BlockInsideABlock`, and `UNIT_OF_WORK_MODE=evaluate` reports it in place of the
+  refusal. Never take a connection from asyncpg: only `Pool` in `app/store/pg.py` does.
+  [adr/template/0034](adr/template/0034-a-unit-of-work-holds-one-connection.md)
+  says why.
 - **A GET request reads one snapshot, and sends each statement once.** A Postgres store method
   that only reads takes `self._database.reading(self._tenant_id)`, and one that writes takes
-  `scoped`. `reading` is READ ONLY, so a write through it fails. In a GET request, every read of
-  the tenant that the first read names runs on the request's snapshot, one at a time. A
-  repeated statement with the same arguments answers from what the snapshot kept. A read of
-  another tenant runs alone, on a connection of its own. Change no value that a read answers. A
-  write in a GET request takes a second connection, and the next read sees it. Take `scoped`
-  only to write: it ends the snapshot. A write on `connection()` calls
-  `PostgresDatabase.written` after it. Start no read of the snapshot, and wait for no loader,
-  inside a `reading` block: `ReadInsideARead` refuses it.
+  `scoped`. `reading` is READ ONLY, so a write through it fails. In a GET request, every read
+  runs on the request's snapshot, one at a time, and points it at the tenant that the read names.
+  A repeated statement with the same arguments answers from what the snapshot kept. Change no
+  value that a read answers. A write in a GET request ends the snapshot first, and the next read
+  sees it. Take `scoped` only to write. Start no task that reads, and wait for no loader, inside
+  a `reading` block: `BlockInsideABlock` refuses it.
   `tests/integration/test_routes_read_a_fixed_count.py` fails on a GET route that sends one statement text more than once in a request, and
   names the code that sent it. `REPEATS_A_STATEMENT` in `tests/integration/filled.py` names
   each route that did so when the project recorded it, and only shrinks.

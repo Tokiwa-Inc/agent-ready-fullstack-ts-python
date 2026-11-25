@@ -94,10 +94,11 @@ class LoopWatch:
             seen = self._seen
             if time.monotonic() - due > TICK_SECONDS and (seen is None or seen[0] != due):
                 frame = _own(sys._current_frames()[self._thread])
-                self._seen = (due, _qualified(frame), frame.f_lineno)
+                self._seen = (due, qualified(frame), frame.f_lineno)
 
 
-def _is_own(frame: FrameType) -> bool:
+def is_own(frame: FrameType) -> bool:
+    """Whether `frame` runs a file of this project's own code, outside an installed package."""
     file = frame.f_code.co_filename
     return file.startswith(OWN_CODE) and "site-packages" not in file
 
@@ -105,13 +106,14 @@ def _is_own(frame: FrameType) -> bool:
 def _own(innermost: FrameType) -> FrameType:
     frame: FrameType | None = innermost
     while frame is not None:
-        if _is_own(frame):
+        if is_own(frame):
             return frame
         frame = frame.f_back
     return innermost
 
 
-def _qualified(frame: FrameType) -> str:
+def qualified(frame: FrameType) -> str:
+    """The module and the qualified name of the function that `frame` runs."""
     module = frame.f_globals.get("__name__")
     named = frame.f_code.co_qualname
     return named if module is None else f"{module}.{named}"

@@ -65,7 +65,13 @@ TELEMETRY_ENV: Final = (
 STATEMENT_TIMEOUT_ENV: Final = "DATABASE_STATEMENT_TIMEOUT"
 IDLE_IN_TRANSACTION_TIMEOUT_ENV: Final = "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT"
 ACQUIRE_TIMEOUT_ENV: Final = "DATABASE_ACQUIRE_TIMEOUT"
-TIMEOUTS_ENV: Final = (STATEMENT_TIMEOUT_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, ACQUIRE_TIMEOUT_ENV)
+HELD_REPORTED_AFTER_ENV: Final = "DATABASE_HELD_REPORTED_AFTER"
+TIMEOUTS_ENV: Final = (
+    STATEMENT_TIMEOUT_ENV,
+    IDLE_IN_TRANSACTION_TIMEOUT_ENV,
+    ACQUIRE_TIMEOUT_ENV,
+    HELD_REPORTED_AFTER_ENV,
+)
 """Every variable `wiring.build_timeouts` reads, each in seconds, and each meaningful only beside
 `DATABASE_URL`."""
 
@@ -73,6 +79,11 @@ INSTANCES_ENV: Final = "DATABASE_INSTANCES"
 """The most processes that hold connections to the database at once, the processes of a revision
 that drains during a rollout included. Meaningful only beside `DATABASE_URL`, and required there in
 production. `docs/adr/template/0022`."""
+
+UNIT_OF_WORK_MODE_ENV: Final = "UNIT_OF_WORK_MODE"
+"""`enforce`, the default, refuses a block that a unit of work cannot run on its one connection,
+and a wait inside a block. `evaluate` reports each, lends the block a second connection, and holds
+the connection across the wait. Meaningful only beside `DATABASE_URL`. `docs/adr/template/0034`."""
 
 ADMISSION_IN_FLIGHT_ENV: Final = "ADMISSION_IN_FLIGHT"
 ADMISSION_PER_SECOND_ENV: Final = "ADMISSION_PER_SECOND"

@@ -3,8 +3,8 @@
 A set read is one statement that answers one value for each of many keys, as `= ANY($1)` does.
 Code for one item asks a loader for one key. The loader holds each key that the request asks in
 one turn of the event loop. Then it runs every set read of that turn, one after another, in one
-unit of work. So a page of items costs one statement for each set read, whatever the page holds,
-and the request holds one connection for them. `docs/adr/template/0032`.
+block of `reading`, on the connection of the request's unit of work. So a page of items costs one
+statement for each set read, whatever the page holds. `docs/adr/template/0032` and `0034`.
 
 A Postgres store method for one item asks the loader. Its memory twin answers from its own rows.
 Items share a turn only when each asks before the turn ends. Start them in one
@@ -13,7 +13,7 @@ Items share a turn only when each asks before the turn ends. Start them in one
 
 import asyncio
 from collections.abc import Awaitable, Callable, Generator, Hashable, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractAsyncContextManager, contextmanager
 from contextvars import ContextVar
 from typing import Any, Final
 
@@ -22,9 +22,11 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app import waits
 from app.models import PAGE_MAX
-from app.store import snapshots
-from app.store.snapshots import Unit
+from app.store import units
 from app.waits import SharedWork
+
+type Reading = Callable[[], AbstractAsyncContextManager[Any]]
+"""A block of `reading`: a connection inside the tenant's transaction."""
 
 type SetRead[K: Hashable, V] = Callable[[Any, Sequence[K]], Awaitable[Mapping[K, V | Exception]]]
 """One statement, on a connection inside the tenant's transaction, that answers one value for
@@ -55,11 +57,13 @@ class Loader:
     """The set reads of one scope of `loading` for one tenant of one database. `loader_of` makes
     each one."""
 
-    def __init__(self, unit: Unit) -> None:
-        self._unit: Final = unit
+    def __init__(self, reading: Reading) -> None:
+        self._reading: Final = reading
         self._turn: int = 0
         self._asked: Final[dict[int, dict[SetRead[Any, Any], dict[Any, None]]]] = {}
-        self._turns: Final = SharedWork[int, _Answers]("a turn of set reads")
+        self._turns: Final = SharedWork[int, _Answers](
+            "a turn of set reads", in_the_callers_unit=True
+        )
         self._one_at_a_time: Final = asyncio.Lock()
 
     async def load[K: Hashable, V](self, read: SetRead[K, V], key: K) -> V:
@@ -70,15 +74,16 @@ class Loader:
         waits until the turn before it has ended, so one loader holds one connection at a time. A
         failure of the turn raises in each of its callers: `NotAnswered` when a set read answers
         other keys than it was handed, `DatabaseUnavailable` when the database does not serve the
-        turn, and what a set read raises. The turn is shared work: when each of its callers is
-        cancelled, the turn is cancelled, and it leaves its unit of work. Raises `RuntimeError` in a
-        set read."""
+        turn, and what a set read raises. The turn is shared work in the unit of work of its
+        callers: when each of its callers is cancelled, the turn is cancelled, and it leaves its
+        block. Raises `RuntimeError` in a set read, and `BlockInsideABlock` inside a block, which
+        holds the connection that the turn reads on."""
         if _IN_A_TURN.get():
             raise RuntimeError(
                 f"a set read asked a loader for {read.__qualname__}. A set read reads on the "
                 f"connection it is handed."
             )
-        snapshots.refuse_inside_a_read(f"a wait for a turn of {read.__qualname__}")
+        units.refuse_inside_a_block(f"a wait for a turn of {read.__qualname__}")
         turn = self._turn
         self._asked.setdefault(turn, {}).setdefault(read, {})[key] = None
         answers = await self._turns.joined(turn, lambda: self._read(turn))
@@ -92,11 +97,10 @@ class Loader:
         async with self._one_at_a_time:
             asked = self._asked.pop(turn)
             self._turn = turn + 1
-            with snapshots.for_a_turn():
-                return await self._each_read(asked)
+            return await self._each_read(asked)
 
     async def _each_read(self, asked: dict[SetRead[Any, Any], dict[Any, None]]) -> _Answers:
-        async with self._unit() as conn:
+        async with self._reading() as conn:
             return {read: await _answered(conn, read, list(keys)) for read, keys in asked.items()}
 
 
@@ -129,9 +133,9 @@ def loading() -> Generator[None]:
         _LOADERS.reset(scope)
 
 
-def loader_of(whose: Hashable, unit: Unit) -> Loader:
+def loader_of(whose: Hashable, reading: Reading) -> Loader:
     """The loader of `whose` in this scope of `loading`, made on first use, which runs each turn
-    in `unit()`. `whose` names everything that a loader must not cross: the database and the
+    in `reading()`. `whose` names everything that a loader must not cross: the database and the
     tenant. A task that work beside the requests started gets loaders of its own, apart from
     those of the request that started the work. Raises `NotLoading` outside `loading`."""
     loaders = _LOADERS.get()
@@ -142,7 +146,7 @@ def loader_of(whose: Hashable, unit: Unit) -> Loader:
         )
     key = (whose, waits.started_beside())
     if key not in loaders:
-        loaders[key] = Loader(unit)
+        loaders[key] = Loader(reading)
     return loaders[key]
 
 

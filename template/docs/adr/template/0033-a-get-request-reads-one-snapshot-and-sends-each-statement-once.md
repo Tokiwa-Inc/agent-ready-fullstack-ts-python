@@ -4,9 +4,11 @@ Date: 2026-11-21
 
 ## Status
 
-Accepted. It replaces two considered options of
+Accepted. It replaces a considered option of
 [0032](0032-a-request-s-reads-do-not-grow-with-its-rows.md) for the reads of a GET request: a
-cache of each value for the whole request, and one unit of work for the whole request.
+cache of each value for the whole request.
+[0034](0034-a-unit-of-work-holds-one-connection.md) puts the snapshot on
+the one connection of the request's unit of work, and points it at each tenant that a read names.
 
 ## Context
 
@@ -26,8 +28,8 @@ The project counted the statements of four GET routes on Postgres, at 1 row and 
 
 Three facts follow:
 
-- About half of the statements set the tenant and who acts. Each store call is one unit of work,
-  and each unit sets them again.
+- About half of the statements set the tenant and who acts. Each store call was one transaction,
+  and each one set them again.
 - The same statement with the same arguments ran up to 4 times in one request. Keeping each
   answer removes 10% to 48% of the statements that read.
 - What remains past the number of statement texts is a read for each item, which 0032 answers
@@ -44,28 +46,30 @@ its own.
   Postgres, in every request and in every test on Postgres. Inside `app.store.jobs.fenced` it is
   not READ ONLY, because Postgres refuses the `FOR KEY SHARE` that holds the claim in a READ ONLY
   transaction.
-- **In a GET or HEAD request, `reading` lends one snapshot: of the first tenant the request
-  reads.** `app/store/snapshots.py` opens it at that first read: one transaction, READ ONLY and
-  REPEATABLE READ, on one connection. Each read of the snapshot sees the same data. A read of
-  another tenant runs alone.
+- **In a GET or HEAD request, `reading` lends one snapshot, on the connection of the request's
+  unit of work.** `app/store/units.py` opens it at the first read: one transaction, READ ONLY and
+  REPEATABLE READ, of the tenant that the read names. Each read of the snapshot sees the same data.
+  A read of another tenant points the snapshot at that tenant
+  ([0034](0034-a-unit-of-work-holds-one-connection.md)).
 - **Each read of a snapshot runs on its one connection, one at a time.** A read waits until the
   read before it ends. The items of a page in one `asyncio.TaskGroup` share the connection, so
   the reads of the snapshot hold one connection.
-- **A snapshot keeps each answer.** `Kept` answers a `fetch`, `fetchrow` or `fetchval` that it
-  already answered: the same method, statement text and arguments, each argument with its type.
-  A list, tuple, set or dict is an argument by what it holds. An argument that cannot be kept,
-  such as a `bytearray`, raises `TypeError`. The keep is at the connection, so no store method can
-  escape it. A statement that calls a function whose answer changes in a transaction, as
-  `SENT_EACH_TIME` names (`clock_timestamp()`, `random()`, an advisory lock), goes to the
-  database each time.
-- **A snapshot ends before the response starts.** `SnapshotsPerRequest` ends the snapshot of the
-  request at `http.response.start`, and when the request ends. The request event of
-  [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) then takes
-  the connection after it. A read after the end runs alone.
-- **A write in a GET request runs in `scoped`, on a connection of its own, and ends the snapshot
-  of its tenant when it commits.** The next read opens a new snapshot, which sees the write and
-  keeps nothing from the old one. A write on `connection()` or `lent()` ends it through
-  `PostgresDatabase.written`. Inside a read, the read ends the snapshot when it ends.
+- **A snapshot keeps each answer, for each tenant.** `Kept` in `app/store/snapshots.py` answers a
+  `fetch`, `fetchrow` or `fetchval` that it already answered: the same method, statement text and
+  arguments, each argument with its type. A list, tuple, set or dict is an argument by what it
+  holds. An argument that cannot be kept, such as a `bytearray`, raises `TypeError`. The keep is at
+  the connection, so no store method can escape it. A statement that calls a function whose answer
+  changes in a transaction, as `SENT_EACH_TIME` names (`clock_timestamp()`, `random()`, an advisory
+  lock), goes to the database each time.
+- **A snapshot ends before the response starts.** The request event of
+  [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) is a write,
+  so it ends the snapshot on the same connection. `UnitPerRequest` gives the connection back at
+  `http.response.start`, which ends a snapshot that no event ended. A read after the start runs
+  alone.
+- **A write in a GET request ends the snapshot before it runs.** `scoped`, `connection()` and
+  `lent()` each end it, on the connection of the unit. The next read opens a new snapshot, which
+  sees the write and keeps nothing from the old one. A write inside a read raises
+  `BlockInsideABlock`.
 - **A read that fails in the database ends the snapshot.** One of `failed_on_a_connection()`, or a
   cancel, ends it. The failure raises in its caller only. The next read opens a new snapshot. So
   an item that catches its own failure, as `AGENTS.md` says, does not make the reads of other
@@ -73,13 +77,13 @@ its own.
   snapshot.
 - **A loader turn reads on the snapshot. Other shared work and work beside the requests read
   alone.** A loader is for one request
-  ([0032](0032-a-request-s-reads-do-not-grow-with-its-rows.md)), so each caller of its turn is in
-  the request. A run of other shared work can be joined by another request, and can outlive this
-  one. `waits.in_shared_work` and `snapshots.for_a_turn` tell them apart. The end of a snapshot
+  ([0032](0032-a-request-s-reads-do-not-grow-with-its-rows.md)), so its turn runs in the unit of
+  work of its callers. A run of other shared work can be joined by another request, and can
+  outlive this one, so it is a unit of its own, which reads no snapshot. The end of a snapshot
   waits for the read in flight, so no read uses the connection after it goes back to the pool.
-- **A read of the snapshot, or a wait for a loader turn, inside a read raises `ReadInsideARead`.**
-  The first read holds the connection until it ends, so the second would wait for ever. A task
-  that a read starts is refused too.
+- **A read in a task that a read started, or a wait for a loader turn inside a read, raises
+  `BlockInsideABlock`.** The first read holds the connection until it ends, so the second would wait
+  for ever. A read of the same tenant inside a read, in the same task, uses the outer read.
 - **A GET route sends each statement text once in a request, on Postgres.**
   `tests/integration/test_routes_read_a_fixed_count.py` records the text of each statement that
   reaches the database, without `SET_TENANT_AND_ACTING` and `SET_ACTING`, and the code that sent
@@ -89,14 +93,13 @@ its own.
   `GROWS_WITH_ROWS`. The template ships it empty.
 - **The test holds itself to its purpose.** A route that reads the first page twice sends what a
   route that reads it once sends. A route that reads each item alone, and one that reads each at
-  once, repeat a statement. Only a route that writes while it reads, or reads a second tenant,
-  holds two connections at once.
+  once, repeat a statement.
 
 ## Considered options
 
 - **A snapshot for every request, a write included.** A write must see the writes that it made,
-  and a POST does not read the same thing twice. Writes keep one unit for each store call. 0017
-  records each unit, and 0022 counts each.
+  and a POST does not read the same thing twice. Writes keep one transaction for each store call,
+  which 0017 records.
 - **A snapshot for each tenant that the request reads.** Each snapshot holds its connection until
   the response starts. So a request holds one connection for each tenant it reads. A request that
   reads more tenants than the pool lends waits on itself until `Timeouts.acquire`, and answers
@@ -109,7 +112,7 @@ its own.
 - **Lend the snapshot only to the task that opened it.** A loader turn runs in its own task, so
   its reads could not use the snapshot, and each item that reads at once needs a snapshot of its
   own.
-- **Lend the snapshot to every task of the request.** A request that joins a run of shared work
+- **Read the snapshot in each run of shared work.** A request that joins a run of shared work
   that another request started would read the other request's snapshot, without its own writes.
   The other request's response would also wait for the run's read.
 - **Keep a snapshot past a write in the request.** A route that asks for a job and then reads it
@@ -125,13 +128,14 @@ its own.
 ## Consequences
 
 - A GET request sends 2 round trips to open its snapshot, `BEGIN` and `SET_TENANT_AND_ACTING`,
-  one for each statement that it does not keep, and 2 to end it, `COMMIT` and the pool's reset. A
-  store call in a snapshot costs one round trip, where it cost 5
-  ([0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md)).
+  one for each statement that it does not keep, and one to end it, `COMMIT`. A store call in a
+  snapshot costs one round trip, where it cost 5 before
+  [0034](0034-a-unit-of-work-holds-one-connection.md) and 4 after it.
 - A GET request holds its connection from its first read until its response starts, where it
-  gave it back between store calls. A wait outside the database in that time holds it too. Past
-  `Timeouts.idle_in_transaction`, Postgres ends the session, and the next read raises
-  `ConnectionLost`, a `503`. Size the pool for the GET requests that run at once.
+  gave it back between store calls. A wait through `waits.waiting` gives it back, and the next read
+  opens a new snapshot. Another wait holds it. Past `Timeouts.idle_in_transaction`, Postgres ends
+  the session, and the next read raises `ConnectionLost`, a `503`. Size the pool for the requests
+  that run at once.
 - The wait for the connection of a snapshot has no bound of its own. It lasts as long as the
   reads ahead of it: each `reading` block, and each loader turn, which may send several
   statements.
@@ -141,22 +145,18 @@ its own.
 - A value that a kept read answers is the same object each time. Code that changes it changes
   the next answer.
 - A read that a project sends with `execute`, a cursor or a prepared statement is not kept.
-- `scoped` ends the snapshot when it commits, even when it wrote nothing. A conditional write
+- `scoped` ends the snapshot before it runs, even when it writes nothing. A conditional write
   reads through `reading` first, and takes `scoped` only to write.
 - A loader turn of more than `PAGE_MAX` keys for one set read sends its statement once for each
   `PAGE_MAX` keys, and the test names it as a repeat.
 - A snapshot that fails to end at the start of the response fails the request with a `500`: the
   response has started, so it cannot become the `503` of `ConnectionLost`.
 - The memory substrate has no snapshot. A route test on it does not see a read that repeats, a
-  write through `reading`, or a read inside a read.
+  write through `reading`, or a block that `BlockInsideABlock` refuses.
 - A project adds `REPEATS_A_STATEMENT` to `filled` when it updates. The update does not write
   `tests/integration/filled.py`.
-- A read of a second tenant in a GET request runs alone, and keeps nothing. It takes a
-  connection of its own while the snapshot holds one, so a GET request that reads two tenants
-  needs two connections. Reads of other tenants at once take one connection each.
-- A read of a second tenant inside a read of the snapshot is not refused. It cannot wait for
-  ever, because it does not wait for the connection of the snapshot.
-- In an `asyncio.TaskGroup` whose items read different tenants, the item that reads first picks
-  the tenant of the snapshot.
+- A read of a second tenant in a GET request points the snapshot at that tenant: one statement
+  each time the tenant changes. Reads of several tenants at once take turns on the one connection.
+- A read of a second tenant inside a read of the snapshot raises `BlockInsideABlock`.
 - Each part of `GET /reads` is a request of its own, so it has a snapshot of its own. Two parts
   of one group may see different data.

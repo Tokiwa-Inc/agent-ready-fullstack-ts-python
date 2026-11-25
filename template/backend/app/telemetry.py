@@ -5,7 +5,8 @@ request is a server span named by its route template, every query it makes a dat
 every request adds to `http.server.request.duration`; `/health` and `/ready` are left out. Only a
 request starts a trace. A query exports a span only inside a traced request. A pooled substrate
 reports its connections as `db.client.connection.count`, by state, and as
-`db.client.connection.max`, and each wait for one to `CONNECTION_WAIT`. Each tick of
+`db.client.connection.max`, each wait for one to `CONNECTION_WAIT`, and how long each one was
+lent to `CONNECTION_USE`. Each tick of
 `app.loop_watch` adds how late it ran to `LOOP_DELAY`. A process that serves no request, such as
 `app.worker`, gets `meters`: the same metrics of its pool and its loop, and no trace. This module
 instruments and `app.log` reads the current span; ruff refuses `opentelemetry` anywhere else.
@@ -102,7 +103,11 @@ CONNECTION_WAIT: Final = "db.client.connection.wait_time"
 ended in a connection, or in `AcquireTimedOut`."""
 
 CONNECTION_WAIT_BUCKETS: Final = (0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
-"""The bucket boundaries of `CONNECTION_WAIT`, in seconds."""
+"""The bucket boundaries of `CONNECTION_WAIT` and `CONNECTION_USE`, in seconds."""
+
+CONNECTION_USE: Final = "db.client.connection.use_time"
+"""The histogram of how long each pooled connection was lent, in seconds: from the end of the
+wait that took it to its return to the pool."""
 
 PROBES: Final = r"^https?://[^/]+(/api)?/(health|ready)$"
 """The URLs never traced or measured: the two probes, bare or under `app.serve`'s prefix."""
@@ -119,15 +124,15 @@ class Meters:
     meter_provider: MeterProvider
 
     def observe(self, database: Database) -> None:
-        """Report the connections of `database` at every collection, and each wait for one to
-        `CONNECTION_WAIT`. A substrate with no pool has no connections to count, and is not
-        observed. Raises `TypeError` for a substrate that counts its connections and does not
-        time its waits."""
+        """Report the connections of `database` at every collection, each wait for one to
+        `CONNECTION_WAIT`, and how long each one was lent to `CONNECTION_USE`. A substrate with
+        no pool has no connections to count, and is not observed. Raises `TypeError` for a
+        substrate that counts its connections and does not time its waits and its uses."""
         if not isinstance(database, Pooled):
             if hasattr(database, "connections"):
                 raise TypeError(
-                    f"{type(database).__name__} counts its connections and has no `time_waits`: "
-                    "give it `time_waits`, or telemetry reports none of its pool"
+                    f"{type(database).__name__} counts its connections and has no `time_waits` "
+                    "or `time_uses`: give it both, or telemetry reports none of its pool"
                 )
             return
 
@@ -155,6 +160,10 @@ class Meters:
         )
         named = {"db.client.connection.pool.name": database.connections().pool}
         database.time_waits(lambda seconds: waits.record(seconds, named))
+        uses = meter.create_histogram(
+            CONNECTION_USE, unit="s", explicit_bucket_boundaries_advisory=CONNECTION_WAIT_BUCKETS
+        )
+        database.time_uses(lambda seconds: uses.record(seconds, named))
 
     def loop_delay(self) -> Callable[[float], None]:
         """What adds one delay, in seconds, to `LOOP_DELAY`."""

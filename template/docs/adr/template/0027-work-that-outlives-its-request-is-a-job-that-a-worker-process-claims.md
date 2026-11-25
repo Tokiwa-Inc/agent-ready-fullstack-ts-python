@@ -70,8 +70,11 @@ More CPU for the same process does not help. One event loop uses one core.
   an outcome. `job_claims` has no audit trigger, because it is not a tenant table. The writes
   of a job to `jobs` and to every other tenant table are audited.
 - **A claim takes one row with `FOR UPDATE SKIP LOCKED`, and sets a new lease token.** It takes a
-  job that is ready, or a job whose lease has ended. So a job that a dead worker held runs
-  again. Each claim counts one attempt. The worker renews the lease while the handler runs.
+  job that is ready, or a job whose lease has ended. So a job that a dead worker held runs again.
+  Each claim counts one attempt. The worker renews the lease while the handler runs. An attempt is
+  one unit of work, and each renewal is one of its own
+  ([0034](0034-a-unit-of-work-holds-one-connection.md)), so a renewal waits for no block of the
+  handler.
 - **Every transaction of a job holds its claim until it commits.** Inside `fenced(claim)`,
   `PostgresDatabase.scoped` runs a `SELECT ... FOR KEY SHARE` on the row in `job_claims` first,
   with the tenant, the token of this attempt and a lease that has not ended. When no row
@@ -264,8 +267,8 @@ More CPU for the same process does not help. One event loop uses one core.
 - Nothing checks that a handler is idempotent. A review does.
 - A job asked for `once_per` a key runs as the actor that asked first. A later ask that it takes
   records no actor of its own on the job.
-- A round and a step of an attempt run again after a connection ended, and the unit may have
-  committed. So each is idempotent. When the write that ends a job committed and its connection
+- A round and a step of an attempt run again after a connection ended, and its transaction may
+  have committed. So each is idempotent. When the write that ends a job committed and its connection
   then ended, the write runs again, finds the claim ended, and the line `lease lost` names the
   attempt. It writes nothing, and the line `job done` is not written.
 - A loop with an exit passes `tests/loops/`: a `while not stopped:`, or a retry that returns

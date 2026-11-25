@@ -21,8 +21,11 @@ class Timeouts:
     acquire: float = 5.0
     """A request that finds every connection in use waits this long, then `AcquireTimedOut`."""
 
+    held: float = 2.0
+    """A connection still lent this long after it was taken is named in `connection held`."""
+
     def __post_init__(self) -> None:
-        if min(self.statement, self.idle_in_transaction, self.acquire) < SMALLEST_BOUND:
+        if min(self.statement, self.idle_in_transaction, self.acquire, self.held) < SMALLEST_BOUND:
             raise ValueError(f"{self} holds a bound under a millisecond, which Postgres ignores")
 
     @property

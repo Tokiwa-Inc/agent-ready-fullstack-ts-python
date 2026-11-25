@@ -41,13 +41,15 @@ nearly every screen read in one group, its largest screen 19 reads in one.
   `PartWaitsOutside` before the wait starts. A route that waits on another system does not
   declare `PART`, and answers alone.
 - **Each part is a request of its own, in the process.** `GET /reads` sends each part through the
-  whole app: every middleware, the identity seam, admission, the request event, the request line
-  and the byte bound. Each part carries the headers of `/reads` and its request id. Each part takes
-  its connection and gives it back, as alone. So one `/reads` holds at most `part_concurrency`
-  connections, and none between parts. `/reads` answers a list of parts in the order of the
-  paths: `answered` with the status, the headers and the body, or `left` with a reason. A
-  `/reads` that names more than `PATHS_AT_MOST` paths, 256, is refused with `422`. `make openapi`
-  writes that number to `src/api/parts.ts`, and `request` starts a second group past it.
+  whole app: every middleware, the identity seam, admission, the request event, the request line and
+  the byte bound. Each part carries the headers of `/reads` and its request id. Each part is a unit
+  of work of its own, which takes its connection and gives it back, as alone. `/reads` gives its own
+  connection back before the parts start ([0034](0034-a-unit-of-work-holds-one-connection.md)). So
+  one `/reads` holds at most `part_concurrency` connections, and none between parts. `/reads`
+  answers a list of parts in the order of the paths: `answered` with the status, the headers and the
+  body, or `left` with a reason. A `/reads` that names more than `PATHS_AT_MOST` paths, 256, is
+  refused with `422`. `make openapi` writes that number to `src/api/parts.ts`, and `request` starts
+  a second group past it.
 - **A part that cannot answer in its group leaves it, and the client sends it again alone.** A part
   leaves when it is not a part route (`not a part`), when it is past `max_parts` (`past the cap`),
   when it takes more than `part_bound_seconds` from its turn (`timed out`), and when its answer does

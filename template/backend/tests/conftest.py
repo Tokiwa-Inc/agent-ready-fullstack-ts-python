@@ -50,6 +50,7 @@ from app.deployment import (
     RESPONSE_ENV,
     TELEMETRY_ENV,
     TIMEOUTS_ENV,
+    UNIT_OF_WORK_MODE_ENV,
 )
 from app.jobs import kinds
 
@@ -140,6 +141,7 @@ def nothing_the_shell_exports(monkeypatch: pytest.MonkeyPatch) -> None:
         *RESPONSE_ENV,
         *TELEMETRY_ENV,
         *TIMEOUTS_ENV,
+        UNIT_OF_WORK_MODE_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
 

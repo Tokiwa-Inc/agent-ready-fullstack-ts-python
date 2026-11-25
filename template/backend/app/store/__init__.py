@@ -169,6 +169,11 @@ class Pooled(Protocol):
         wait that ended in a connection, or in no connection within the bound."""
         ...
 
+    def time_uses(self, record: Callable[[float], None]) -> None:
+        """From now on, hand `record` how long each connection was lent, in seconds: from the
+        end of the wait that took it to its return to the pool."""
+        ...
+
 
 @runtime_checkable
 class Database(Protocol):

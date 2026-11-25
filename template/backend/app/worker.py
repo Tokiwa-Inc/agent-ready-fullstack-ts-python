@@ -33,7 +33,7 @@ from app.failing import AttemptsSpent
 from app.loop_watch import LoopWatch
 from app.loops import DatabaseGone, rounds
 from app.pacing import backoff, every
-from app.store import DatabaseUnavailable
+from app.store import DatabaseUnavailable, units
 from app.store.jobs import (
     MAX_ATTEMPTS,
     Asked,
@@ -115,13 +115,16 @@ async def run(claims: JobClaims, claim: Claim) -> None:
     lease stops the attempt, and `log.lease_lost` names it. A step the database does not serve
     before the lease would end stops it too, and `log.attempt_abandoned` names it: the lease ends,
     and the next claim runs the job again. A step is the read of what the job asked, or a write
-    that ends the attempt."""
+    that ends the attempt. The attempt is one unit of work, named `job <kind>`, and its steps and
+    its handler share its connection. Each renewal of the lease is a unit of work of its own,
+    which waits for no block of the attempt."""
     held = _Held(claim.held_until)
     try:
-        with fenced(claim):
-            asked = await _served(held, lambda: claims.asked(claim))
-            with acting_as(asked.actor), loading():
-                await _attempt(claims, claim, held, asked)
+        async with units.unit(lambda: f"job {claim.kind}", reads_a_snapshot=False):
+            with fenced(claim):
+                asked = await _served(held, lambda: claims.asked(claim))
+                with acting_as(asked.actor), loading():
+                    await _attempt(claims, claim, held, asked)
     except LeaseLost:
         log.lease_lost(kind=claim.kind, job=claim.id, attempt=claim.attempts)
     except AttemptAbandoned:
@@ -193,7 +196,8 @@ async def _renewing[T](
 async def _renew(claims: JobClaims, claim: Claim, held: _Held) -> None:
     async for _ in every(claims.leases.renewal):
         try:
-            held.until = await claims.renew(claim)
+            async with units.unit(lambda: f"renewal of job {claim.kind}", reads_a_snapshot=False):
+                held.until = await claims.renew(claim)
         except DatabaseUnavailable as unavailable:
             log.database_unavailable(type(unavailable).__name__, unavailable.cause)
 

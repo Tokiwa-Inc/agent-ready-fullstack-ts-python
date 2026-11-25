@@ -127,13 +127,15 @@ def test_the_pool_reports_its_connections_by_state_the_most_it_will_open_and_eac
         database = app.state.database
         assert isinstance(database, PostgresDatabase)
         assert client.portal is not None
-        opened = client.portal.call(database.pool)
         with client.portal.wrap_async_context_manager(database.connection()):
             collected = metrics.get_metrics_data()
 
-    [waited] = waits(collected, pool=provisioned.schema)
+    [waited] = histogram(collected, telemetry.CONNECTION_WAIT, pool=provisioned.schema)
     assert waited.count >= 1
     assert tuple(waited.explicit_bounds) == telemetry.CONNECTION_WAIT_BUCKETS
+    [lent] = histogram(collected, telemetry.CONNECTION_USE, pool=provisioned.schema)
+    assert lent.count >= 1
+    assert tuple(lent.explicit_bounds) == telemetry.CONNECTION_WAIT_BUCKETS
     reported = by_state(collected, pool=provisioned.schema)
     assert reported.keys() == {
         ("db.client.connection.count", "used"),
@@ -146,19 +148,19 @@ def test_the_pool_reports_its_connections_by_state_the_most_it_will_open_and_eac
     assert used >= 1
     assert idle >= 0
     assert used + idle <= most
-    assert most == opened.get_max_size()
+    assert most == database.budget().pool
 
 
-def waits(collected: MetricsData | None, *, pool: str) -> list[HistogramDataPoint]:
-    """Each point of the connection wait histogram. Fails on a point that is not a histogram,
-    names another pool or carries another attribute."""
+def histogram(collected: MetricsData | None, name: str, *, pool: str) -> list[HistogramDataPoint]:
+    """Each point of the histogram `name`. Fails on a point that is not a histogram, names
+    another pool or carries another attribute."""
     assert collected is not None
     points = [
         point
         for resource in collected.resource_metrics
         for scope in resource.scope_metrics
         for metric in scope.metrics
-        if metric.name == telemetry.CONNECTION_WAIT
+        if metric.name == name
         for point in metric.data.data_points
     ]
     waited: list[HistogramDataPoint] = []
@@ -179,7 +181,7 @@ def by_state(collected: MetricsData | None, *, pool: str) -> dict[tuple[str, str
         for scope in resource.scope_metrics
         for metric in scope.metrics
         if metric.name.startswith("db.client.connection.")
-        and metric.name != telemetry.CONNECTION_WAIT
+        and metric.name not in (telemetry.CONNECTION_WAIT, telemetry.CONNECTION_USE)
         for point in metric.data.data_points
     ]
     reported: dict[tuple[str, str | None], float] = {}

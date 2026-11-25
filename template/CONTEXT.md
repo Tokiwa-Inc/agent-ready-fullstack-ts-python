@@ -240,18 +240,33 @@ _Avoid_: batch, bulk read, multi-get.
 
 **Loader**:
 What reads the keys that the items of one request ask for in one turn of the event loop: each set
-read of the turn once, one after another, on one connection. It keeps nothing past the turn.
+read of the turn once, one after another, in one block on the connection of the unit of work. It
+keeps nothing past the turn.
 `PostgresDatabase.loader` answers the loader of a tenant in a request, or in an attempt of a job.
 _Avoid_: DataLoader, batcher, identity map, cache.
 
 **Snapshot**:
-A transaction, READ ONLY and REPEATABLE READ, on one connection. A GET request has one, of the
-tenant that its first read names. A read of another tenant runs alone. The snapshot keeps each
-answer, so a statement with the same arguments reaches the database once in it. It ends before
-the response starts, when the request writes to its tenant, and when a read in it fails in the
-database. The next read of its tenant opens a new one.
+A transaction, READ ONLY and REPEATABLE READ, on the connection of a GET request's unit of work. It
+opens at the first read, and each read points it at the tenant that the read names. It keeps each
+answer of each tenant, so a statement with the same arguments reaches the database once in it. It
+ends before the response starts, before a block that does not read it, before a wait, and when a
+read in it fails in the database. The next read opens a new one.
 `PostgresDatabase.reading` lends it. `docs/adr/template/0033`.
 _Avoid_: cache, identity map, read transaction, session.
+
+**Unit of work**:
+What one request, one attempt of a job, one run of shared work, or one task of work beside the
+requests does on the database. It holds at most one connection of each database at a time, from
+its first block until it ends, its response starts, or it waits through `app.waits.waiting`. Each
+store call is one block on that connection. `app/store/units.py` holds it.
+`docs/adr/template/0034`.
+_Avoid_: session, transaction (a block may open one), request scope.
+
+**Block**:
+One use of the connection of a unit of work: `lent`, `connection`, `reading` or `scoped` of
+`PostgresDatabase`. The blocks of a unit run one at a time. A block outside every unit takes a
+connection of its own.
+_Avoid_: lend, checkout, unit.
 
 **Connection budget**:
 The share of the server's `max_connections` that each process may hold, and the template's pool
@@ -311,15 +326,15 @@ _Avoid_: blip, busy (a busy pool is one cause), down.
 
 **Work beside the requests**:
 A task that `app.waits.beside` started, for work the caller does not wait for. It runs outside
-every request, ends within the request budget, ends with its process, and the lifespan cancels
-it at shutdown. Work whose loss matters is a job.
+every request, as a unit of work of its own, ends within the request budget, ends with its
+process, and the lifespan cancels it at shutdown. Work whose loss matters is a job.
 _Avoid_: background task (FastAPI's `BackgroundTasks` run inside the request).
 
 **Shared work**:
 Work that several callers await at once, which `app.waits.SharedWork` runs one run at a time for
-each key. A run is one execution of it. A cancelled caller does not stop a run for the others. The
-last caller to leave cancels the run. A run is in a request, whoever starts it. `cancel_beside`
-cancels a run at shutdown.
+each key. A run is one execution of it, and a unit of work of its own, except a turn of a
+loader. A cancelled caller does not stop a run for the others. The last caller to leave cancels
+the run. A run is in a request, whoever starts it. `cancel_beside` cancels a run at shutdown.
 _Avoid_: single-flight, dedupe.
 
 **Conformance debt**:

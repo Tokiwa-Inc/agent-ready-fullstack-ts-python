@@ -1,8 +1,7 @@
 """A page is picked in SQL. No read of a list fetches more than one row past the page, so a read
 costs what it answers, whatever the tenant holds. `docs/adr/template/0026`."""
 
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
@@ -11,41 +10,42 @@ import pytest
 from app.audit_events import acting_as
 from app.models import PAGE_MAX, CreateTaskBody
 from app.store import Database, TaskStore, paging
-from app.store.pg import PostgresDatabase
+from app.store.pg import Pool
+from app.store.units import Holder
 from tests.pages import every_event, every_task
 from tests.store_contract import A_REQUEST, ACTOR
-
-Lent = Callable[[PostgresDatabase], AbstractAsyncContextManager[Any]]
 
 
 class Counted:
     """A connection that adds the number of rows each `fetch` returns to `fetched`."""
 
     def __init__(self, conn: Any, fetched: list[int]) -> None:
-        self._conn: Any = conn
+        self.conn: Any = conn
         self._fetched: list[int] = fetched
 
     async def fetch(self, *args: Any) -> list[Any]:
-        rows: list[Any] = await self._conn.fetch(*args)
+        rows: list[Any] = await self.conn.fetch(*args)
         self._fetched.append(len(rows))
         return rows
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._conn, name)
+        return getattr(self.conn, name)
 
 
 @pytest.fixture
 def fetched(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """The number of rows each `fetch` on a pooled connection returned, from now on."""
     counts: list[int] = []
-    unmeasured: Lent = PostgresDatabase.lent
+    taken, given_back = Pool.taken, Pool.given_back
 
-    @asynccontextmanager
-    async def counted(self: PostgresDatabase) -> AsyncGenerator[Any]:
-        async with unmeasured(self) as conn:
-            yield Counted(conn, counts)
+    async def counted(self: Pool, holder: Holder) -> Counted:
+        return Counted(await taken(self, holder), counts)
 
-    monkeypatch.setattr(PostgresDatabase, "lent", counted)
+    async def uncounted(self: Pool, conn: Counted, holder: Holder) -> None:
+        await given_back(self, conn.conn, holder)
+
+    monkeypatch.setattr(Pool, "taken", counted)
+    monkeypatch.setattr(Pool, "given_back", uncounted)
     return counts
 
 

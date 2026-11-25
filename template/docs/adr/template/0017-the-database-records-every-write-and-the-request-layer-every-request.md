@@ -44,22 +44,24 @@ each store method records its own event holds only for the stores that remember 
 - **A write with no actor is refused.** The trigger reads the actor from connection settings,
   `ACTING_GUCS`, and raises when no actor issuer or subject is set.
   `test_a_write_with_no_actor_is_refused_and_changes_nothing` holds this.
-- **A unit of work names who acts in the statement that sets the tenant.** `scoped` in
-  `app/store/pg.py` takes a connection from `lent()`, which names nobody. The first statement of
-  its transaction, `SET_TENANT_AND_ACTING`, sets the tenant and every one of `ACTING_GUCS` for the
-  transaction. A store call then costs 5 round trips: `BEGIN`, that statement, its own statement,
-  `COMMIT`, and the pool's reset.
+- **A transaction names who acts in the statement that sets the tenant.** `scoped` in
+  `app/store/pg.py` runs on the connection of the unit of work
+  ([0034](0034-a-unit-of-work-holds-one-connection.md)), which names
+  nobody. The first statement of its transaction, `SET_TENANT_AND_ACTING`, sets the tenant and every
+  one of `ACTING_GUCS` for the transaction. A store call then costs 4 round trips: `BEGIN`, that
+  statement, its own statement and `COMMIT`. The pool's reset costs one more for the unit.
   `test_a_store_call_sets_the_tenant_and_who_acts_in_one_statement` holds this.
 - **A connection from `connection()` names who acts for its session.** `connection()` sets
   every one of `ACTING_GUCS` on each connection it lends, for a project's own transaction or a
-  statement outside one. `test_a_connection_lent_outside_a_unit_of_work_names_who_acts` holds
-  this. A connection from `lent()` names nobody until its unit does, so a write on it is
-  refused.
-- **Each setting comes from the task that acts.** The values are `audit_events.current_actor()`
-  and the request id and trace id in `app/log.py`. Each one is empty when nothing is known. The
-  pool's reset clears each session setting when a connection comes back, so a connection lent
-  again does not carry the actor it had. `test_a_connection_lent_again_names_nobody` holds this:
-  a write on `lent()` is refused after `connection()` named who acts on the same connection.
+  statement outside one. `test_a_connection_lent_outside_a_transaction_names_who_acts` holds
+  this. A connection from `lent()` names nobody until a transaction or `connection()` does, so a
+  write on it is refused. In a unit of work, the session setting lasts until the unit gives the
+  connection back.
+- **Each setting comes from the task that acts.** The values are `audit_events.current_actor()` and
+  the request id and trace id in `app/log.py`. Each one is empty when nothing is known. The pool's
+  reset clears each session setting when a connection comes back, so a connection lent to another
+  unit of work does not carry the actor it had. `test_a_connection_lent_again_names_nobody` holds
+  this: a write on `lent()` is refused after `connection()` named who acts on the same connection.
 - **The store takes no actor.** No method of `TaskStore` in `app/store/__init__.py` has one.
   Nothing a project writes passes one, so nothing can pass the wrong one or forget to.
 - **A request acts as its principal.** `audit_events.serve` names the principal on the request
@@ -75,7 +77,8 @@ each store method records its own event holds only for the stores that remember 
   and not refused. `test_a_row_a_migration_writes_is_recorded_under_the_release_step` holds this
   for `apply`.
 - **The request layer records one request event for each request a principal made.**
-  `app/request_events.py` records it after the handler, before the response start leaves. It
+  `app/request_events.py` records it after the handler, before the response start leaves, on the
+  connection of the request's unit of work. It
   names the method, the route template, the values of the path parameters and the status. It
   names no action and no table: a `POST` that starts a run created nothing, and the row events
   name what changed. A refusal, a `404` and a `500` are recorded, because an attempt is what a review
@@ -135,12 +138,12 @@ each store method records its own event holds only for the stores that remember 
   each store call. `scoped` already sets the tenant in one place, so it names who acts in the
   same statement. `connection()` keeps the session setting for a project's own transactions.
 - **The actor set for the transaction in every opener, and no reset when a connection comes
-  back.** A store call then costs 4 round trips. A project's own opener of a transaction must
-  set the actor too. A session setting or a session advisory lock that a project takes on a
-  pooled connection then passes to the next request, and nothing reports it.
-- **`BEGIN` and the settings in one statement.** A store call then costs 4 round trips, and
+  back.** A project's own opener of a transaction must set the actor too. A session setting or a
+  session advisory lock that a project takes on a pooled connection then passes to the next unit
+  of work, and nothing reports it.
+- **`BEGIN` and the settings in one statement.** A store call then costs 3 round trips, and
   each setting is a literal in the SQL. asyncpg refuses `Connection.transaction()` inside a
-  transaction that it did not start, so a savepoint inside a unit of work fails.
+  transaction that it did not start, so a savepoint inside a transaction fails.
 - **The request event recorded by the identity dependency.** It runs before the handler, so it
   cannot know the status.
 - **An action on a request event, from its method.** Most `POST` routes in a real project are
@@ -161,7 +164,7 @@ each store method records its own event holds only for the stores that remember 
 
 - A project gets row events for every table it lists in `TENANT_TABLES`, and request events for
   every route under the identity dependency, with no code of its own.
-- Every write costs one insert for each tenant the statement wrote. A unit of work costs no
+- Every write costs one insert for each tenant the statement wrote. A transaction costs no
   statement of its own to name who acts. Every connection that `connection()` lends costs one.
   Every request a principal makes costs one insert.
 - A key value that holds `:` makes a composite key read in more than one way.

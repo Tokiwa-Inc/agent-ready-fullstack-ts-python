@@ -8,11 +8,11 @@ import asyncpg
 import pytest
 
 from app.store.budget import Draws
-from app.store.pg import ConnectionLost, ConnectionRefused, PostgresDatabase
+from app.store.pg import ConnectionLost, ConnectionRefused, Pool, PostgresDatabase
 from app.store.timeouts import TIMEOUTS, Timeouts
 
 
-@pytest.mark.parametrize("field", ["statement", "idle_in_transaction", "acquire"])
+@pytest.mark.parametrize("field", ["statement", "idle_in_transaction", "acquire", "held"])
 def test_a_bound_postgres_would_read_as_none_is_refused(field: str) -> None:
     with pytest.raises(ValueError, match="under a millisecond"):
         Timeouts(**{field: 0})
@@ -78,10 +78,10 @@ def lending(monkeypatch: pytest.MonkeyPatch, session: _Session) -> PostgresDatab
         kinds=lambda _: {},
     )
 
-    async def pool() -> _Lends:
+    async def opened(_pool: Pool) -> _Lends:
         return _Lends(session)
 
-    monkeypatch.setattr(database, "pool", pool)
+    monkeypatch.setattr(Pool, "opened", opened)
     return database
 
 

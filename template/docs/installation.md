@@ -962,6 +962,37 @@ What to expect, because it is not all free:
   that the rule still reports for a key handler is a widget: give it that widget's role, or move
   the handler onto the control.
 
+- **From 0.99.0 each unit of work holds one connection.** A request, an attempt of a job, a run of
+  shared work and a task beside the requests each hold at most one, and each store call runs on
+  it. A store that took a second connection inside a request now raises `BlockInsideABlock`, a
+  `500`, where it could lock the pool before.
+  [adr/template/0034](adr/template/0034-a-unit-of-work-holds-one-connection.md)
+  says why. After the update:
+  - Deploy with `UNIT_OF_WORK_MODE=evaluate` first. Each place that the template would refuse
+    writes `unit of work would refuse`, with its route and code, and takes a second connection as
+    before. Fix each place, then unset the variable.
+  - Delete each call to `PostgresDatabase.written`. A write on `lent()` or `connection()` ends the
+    snapshot before it runs, so the next read sees it.
+  - `PostgresDatabase.pool()` is gone, and only `Pool` in `app/store/pg.py` takes a connection from
+    asyncpg. Where you read on the asyncpg pool, read in a block of `lent()`. A test that replaced
+    `PostgresDatabase.lent` to count connections replaces `Pool.taken` and `Pool.given_back`, as
+    `tests/integration/reading.py` does.
+  - `ReadInsideARead` is `BlockInsideABlock`, and `READ_METHODS` moved, both to
+    `app/store/units.py`. `app/store/snapshots.py` keeps `Kept` and `SENT_EACH_TIME`, and nothing
+    else: `Snapshots`, `SnapshotsPerRequest`, `snapshotted`, `reading`, `written`, `instrument`,
+    `for_a_turn`, `refuse_inside_a_read` and the `Unit` type are gone. `loads.Reading` is the type
+    of what `loader_of` runs each turn in. A test that opened a snapshot opens a unit:
+    `units.unit(lambda: "GET /route", reads_a_snapshot=True)`, and `give_back()` in place of
+    `end()`. The update deletes `backend/tests/store/test_snapshots.py`.
+  - Delete `MORE_THAN_ONE_CONNECTION` from `tests/integration/filled.py`, and its key from
+    `backend/.list-debt.json`. The update writes neither file, and `tests/test_list_debt.py`
+    fails on the key until you delete it.
+  - A substrate of yours that counts its connections gets `time_uses` beside `time_waits`.
+  - `waits.in_shared_work` is gone. `connection held` names a unit that holds a connection past
+    2 seconds; a worker whose jobs hold one longer sets `DATABASE_HELD_REPORTED_AFTER`.
+  - Call each client of a system outside the process inside `app.waits.waiting`, which gives the
+    connection back first. `tests/waits/test_the_only_door.py` names each line that does not.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

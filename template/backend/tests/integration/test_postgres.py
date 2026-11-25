@@ -98,13 +98,12 @@ async def test_a_database_missing_a_later_column_is_repaired(
     database = a_database(schema)
     try:
         await apply_schema(postgres_dsn(), schema)
-        pool = await database.pool()
-        assert await _column_exists(pool, schema, "note") is False
+        assert await _column_exists(database, schema, "note") is False
 
         monkeypatch.setattr(ddl, "SCHEMA", [*ddl.SCHEMA, NOTE_REPAIR])
         assert await apply_schema(postgres_dsn(), schema) == NOTE_REPAIR[0]
 
-        assert await _column_exists(pool, schema, "note") is True
+        assert await _column_exists(database, schema, "note") is True
     finally:
         await database.close()
         await drop_schema(postgres_dsn(), schema)
@@ -118,9 +117,9 @@ async def test_the_pool_points_at_our_schema_on_every_checkout() -> None:
     database = a_database(schema)
     try:
         await apply_schema(postgres_dsn(), schema)
-        pool = await database.pool()
         for _ in range(6):
-            assert await pool.fetchval("SELECT current_schema()") == schema
+            async with database.lent() as conn:
+                assert await conn.fetchval("SELECT current_schema()") == schema
     finally:
         await database.close()
         await drop_schema(postgres_dsn(), schema)
@@ -147,13 +146,14 @@ async def test_the_emitted_script_applies_and_satisfies_check_mode() -> None:
         await drop_schema(postgres_dsn(), schema)
 
 
-async def _column_exists(pool: Any, schema: str, column: str) -> bool:
-    found = await pool.fetchval(
-        "SELECT 1 FROM information_schema.columns "
-        "WHERE table_schema = $1 AND table_name = 'tasks' AND column_name = $2",
-        schema,
-        column,
-    )
+async def _column_exists(database: Any, schema: str, column: str) -> bool:
+    async with database.lent() as conn:
+        found = await conn.fetchval(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = $1 AND table_name = 'tasks' AND column_name = $2",
+            schema,
+            column,
+        )
     return found is not None
 
 

@@ -45,7 +45,7 @@ import math
 import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any
+from typing import Any, Final
 from uuid import UUID, uuid4
 
 from app import log
@@ -68,7 +68,7 @@ from app.store import (
     TaskStore,
     TenantUnset,
     numbered,
-    snapshots,
+    units,
 )
 from app.store.acting import SET_ACTING, SET_TENANT_AND_ACTING, acting
 from app.store.budget import ConnectionBudget, Draws, budgeted, server_limits
@@ -88,6 +88,7 @@ from app.store.loads import Loader, loader_of
 from app.store.migrate import check, schema_version
 from app.store.paging import fetch_page
 from app.store.timeouts import TIMEOUTS, Timeouts, milliseconds
+from app.store.units import HOLDS, Holder, Need, Opened, Switched
 
 _TASKS = "SELECT id, title, done, seq FROM tasks"
 _TASKS_BEFORE = "SELECT id, title, done, seq FROM tasks WHERE seq < $1"
@@ -411,23 +412,21 @@ def _refuse_unset(tenant_id: str) -> None:
         )
 
 
-class PostgresDatabase:
-    """The pool, the schema, and the lifecycle."""
+class Pool:
+    """The pool of one `PostgresDatabase`, and the one place that takes a connection from asyncpg
+    and gives it back. A unit of work of `app/store/units.py` holds what it lends.
 
-    name: str = "postgres"
+    It reports who holds each connection it lent. Past `Timeouts.held`, `log.connection_held`
+    names the holder of a connection still lent. When no connection comes within
+    `Timeouts.acquire`, `log.acquire_timed_out` names each holder, and counts the connections
+    that go back to the pool and the ones that open.
+    """
 
     def __init__(
-        self,
-        *,
-        dsn: str,
-        draws: Draws,
-        kinds: Callable[["PostgresDatabase"], Kinds],
-        schema: str | None = None,
-        min_size: int = 1,
-        timeouts: Timeouts = TIMEOUTS,
+        self, *, dsn: str, schema: str, draws: Draws, min_size: int, timeouts: Timeouts
     ) -> None:
         self._dsn: str = dsn
-        self.schema: str = resolve_schema(schema)
+        self._schema: str = schema
         self._draws: Draws = draws
         self._min_size: int = min_size
         self._timeouts: Timeouts = timeouts
@@ -435,18 +434,26 @@ class PostgresDatabase:
         self._pool: Any = None
         self._opening: asyncio.Lock = asyncio.Lock()
         self._waited: Callable[[float], None] | None = None
-        self.kinds: Kinds = kinds(self)
-        """Each kind of job, and the handler that `kinds` built for it."""
+        self._used: Callable[[float], None] | None = None
+        self._holders: dict[Holder, tuple[Any, asyncio.TimerHandle]] = {}
+        """The asyncpg pool that lent each holder its connection, and the report of its hold."""
+
+    @property
+    def ends(self) -> tuple[type[BaseException], ...]:
+        return failed_on_a_connection()
+
+    @property
+    def retry_after(self) -> int:
+        return math.ceil(self._timeouts.acquire)
 
     def budget(self) -> ConnectionBudget:
-        """The budget the pool opened under. Raises `RuntimeError` before the pool first opens."""
         if self._budget is None:
             raise RuntimeError("the pool has not opened, so it has no budget yet")
         return self._budget
 
     def _server_settings(self) -> dict[str, str]:
         return {
-            "search_path": self.schema,
+            "search_path": self._schema,
             "statement_timeout": milliseconds(self._timeouts.statement),
             "idle_in_transaction_session_timeout": milliseconds(self._timeouts.idle_in_transaction),
         }
@@ -470,15 +477,10 @@ class PostgresDatabase:
         )
         return budget
 
-    async def pool(self) -> Any:
-        """One pool, created on first use so construction stays synchronous and cheap, and
-        sized from the connection budget. Raises `OverBudget` when the draws do not fit.
-
-        Guarded, because two coroutines arriving before it exists would each create one and
-        the loser's would be leaked -- holding its connections until the process exits, with
-        nothing to show for it. The lifespan opens the pool before any request is served, so
-        the guard is for the next caller rather than for today's.
-        """
+    async def opened(self) -> Any:
+        """The asyncpg pool, created on first use and sized from the connection budget. Callers
+        that arrive before it exists get the same one. Raises `OverBudget` when the draws do not
+        fit."""
         if self._pool is None:
             async with self._opening:
                 if self._pool is None:
@@ -492,71 +494,92 @@ class PostgresDatabase:
                     )
         return self._pool
 
-    @asynccontextmanager
-    async def connection(self) -> AsyncGenerator[Any]:
-        """A connection from the pool that names who acts for its session, returned to it on
-        exit. Raises as `lent` raises."""
-        async with self.lent() as conn:
-            await conn.execute(SET_ACTING, *_who_acts())
-            yield conn
-
-    @asynccontextmanager
-    async def lent(self) -> AsyncGenerator[Any]:
-        """A connection from the pool that names nobody, returned to it on exit: for a unit of
-        work that names who acts in its own transaction, or for work that writes no audited
-        table. Raises `AcquireTimedOut` when none comes within `Timeouts.acquire`,
-        `ConnectionRefused` when a new one does not open, and `ConnectionLost` when the block
-        fails because the connection ended. Each tells the client to ask again after
-        `Timeouts.acquire`.
+    async def taken(self, holder: Holder) -> Any:
+        """A connection from the pool, which `holder` holds until `given_back`. Raises
+        `AcquireTimedOut` when none comes within `Timeouts.acquire`, and `ConnectionRefused`
+        when a new one does not open. Each tells the client to ask again after
+        `Timeouts.acquire`. Raises `RuntimeError` when what holds `holder` holds a connection of
+        this pool already.
 
         A wait that ends in a connection or in `AcquireTimedOut` goes to the recorder that
         `time_waits` set, if any. When the pool grows, the wait includes opening a new
         connection. A refusal and a cancelled wait go to no recorder."""
-        pool = await self.pool()
-        retry_after = self.retry_after
+        if any(lent.owner is holder.owner for lent in self._holders):
+            raise RuntimeError(f"a unit of work took more than {HOLDS} connection of one database")
+        pool = await self.opened()
         started = time.monotonic()
         try:
             conn = await pool.acquire(timeout=self._timeouts.acquire)
         except TimeoutError as waited:
-            self._record_wait(started)
+            self._record(self._waited, started)
+            self._report_holders(pool, started)
             raise AcquireTimedOut(
                 f"no connection within {self._timeouts.acquire}s: all {self.budget().pool} "
                 f"stayed in use, or a new one did not open in time",
-                retry_after=retry_after,
+                retry_after=self.retry_after,
             ) from waited
         except _refused_by_the_server() as refused:
-            raise self._refused(refused) from refused
+            raise self.refused(refused) from refused
+        self._record(self._waited, started)
+        self._holders[holder] = (
+            pool,
+            asyncio.get_running_loop().call_later(self._timeouts.held, self._report_held, holder),
+        )
+        return conn
+
+    async def given_back(self, conn: Any, holder: Holder) -> None:
+        """Give `conn` back to the pool, or end it when Postgres ended it while it was lent. The
+        time from `taken` goes to the recorder that `time_uses` set, if any."""
+        lent_by, report = self._holders[holder]
+        holder.releasing = True
         try:
-            self._record_wait(started)
-            yield conn
-        except failed_on_a_connection() as failed:
-            if _ended(conn):
-                raise ConnectionLost(
-                    f"the connection ended during the unit of work: {type(failed).__name__}",
-                    retry_after=retry_after,
-                ) from failed
-            raise
-        finally:
             if _ended_but_still_lent(conn):
                 conn.terminate()
             else:
-                await pool.release(conn)
+                await lent_by.release(conn)
+        finally:
+            holder.releasing = False
+            holder.released = time.monotonic()
+            report.cancel()
+            del self._holders[holder]
+            if self._used is not None:
+                self._used(holder.released - holder.acquired)
 
-    @property
-    def retry_after(self) -> int:
-        """The whole seconds after which a unit of work that met `DatabaseUnavailable` runs
-        again: `Timeouts.acquire`, rounded up."""
-        return math.ceil(self._timeouts.acquire)
-
-    def _refused(self, refused: BaseException) -> ConnectionRefused:
-        return ConnectionRefused(
-            f"a new connection did not open: {type(refused).__name__}",
+    def lost(self, conn: Any, failed: BaseException) -> BaseException | None:
+        if not _ended(conn):
+            return None
+        return ConnectionLost(
+            f"the connection ended during the unit of work: {type(failed).__name__}",
             retry_after=self.retry_after,
         )
 
+    def _report_held(self, holder: Holder) -> None:
+        now = time.monotonic()
+        log.connection_held(
+            pool=self._schema,
+            route=holder.unit(),
+            function=holder.function,
+            line=holder.line,
+            held_ms=holder.held_ms(now),
+            idle_ms=holder.idle_ms(now),
+        )
+
+    def _report_holders(self, pool: Any, started: float) -> None:
+        now = time.monotonic()
+        log.acquire_timed_out(
+            pool=self._schema,
+            waited_ms=round((now - started) * 1000, 1),
+            holders=[holder.held(now) for holder in self._holders],
+            releasing=sum(holder.releasing for holder in self._holders),
+            opening=_opening(pool),
+        )
+
+    def refused(self, refused: BaseException) -> ConnectionRefused:
+        return ConnectionRefused(
+            f"a new connection did not open: {type(refused).__name__}", retry_after=self.retry_after
+        )
+
     async def dedicated(self) -> Any:
-        """A connection of its own, outside the pool and its budget, with the same search path
-        and bounds. The caller closes it. Raises `ConnectionRefused` when it does not open."""
         try:
             return await _driver().connect(
                 dsn=self._dsn,
@@ -565,26 +588,99 @@ class PostgresDatabase:
                 server_settings=self._server_settings(),
             )
         except _refused_by_the_server() as refused:
-            raise self._refused(refused) from refused
+            raise self.refused(refused) from refused
+
+    def connections(self) -> Connections:
+        pool = self._pool
+        if pool is None:
+            most = 0 if self._budget is None else self._budget.pool
+            return Connections(pool=self._schema, used=0, idle=0, max_size=most)
+        idle = pool.get_idle_size()
+        return Connections(
+            pool=self._schema,
+            used=pool.get_size() - idle,
+            idle=idle,
+            max_size=pool.get_max_size(),
+        )
+
+    def time_waits(self, record: Callable[[float], None]) -> None:
+        self._waited = record
+
+    def time_uses(self, record: Callable[[float], None]) -> None:
+        self._used = record
+
+    def _record(self, recorder: Callable[[float], None] | None, started: float) -> None:
+        if recorder is not None:
+            recorder(time.monotonic() - started)
+
+    async def close(self) -> None:
+        if self._pool is not None:
+            await self._pool.close()
+            self._pool = None
+
+
+def _opening(pool: Any) -> int:
+    """The slots of `pool` that a wait took from its queue and that are not lent yet: each opens
+    a connection, or hands one over. It reads the holders of asyncpg's pool."""
+    queued = set(pool._queue._queue)
+    return sum(1 for slot in pool._holders if slot._in_use is None and slot not in queued)
+
+
+class PostgresDatabase:
+    """The pool, the schema, and the lifecycle. Each store reaches the pool through a block of
+    the running unit of work: `lent`, `connection`, `reading` or `scoped`.
+    `docs/adr/template/0034`."""
+
+    name: str = "postgres"
+
+    def __init__(
+        self,
+        *,
+        dsn: str,
+        draws: Draws,
+        kinds: Callable[["PostgresDatabase"], Kinds],
+        schema: str | None = None,
+        min_size: int = 1,
+        timeouts: Timeouts = TIMEOUTS,
+        enforced: bool = True,
+    ) -> None:
+        self.schema: str = resolve_schema(schema)
+        self._pool: Final = Pool(
+            dsn=dsn, schema=self.schema, draws=draws, min_size=min_size, timeouts=timeouts
+        )
+        self.enforced: Final = enforced
+        """Whether a block that the unit of work cannot run on its one connection raises
+        `BlockInsideABlock`, or takes a connection of its own and `log.unit_would_refuse` names
+        it."""
+        self.kinds: Kinds = kinds(self)
+        """Each kind of job, and the handler that `kinds` built for it."""
+
+    def budget(self) -> ConnectionBudget:
+        """The budget the pool opened under. Raises `RuntimeError` before the pool first opens."""
+        return self._pool.budget()
+
+    @property
+    def retry_after(self) -> int:
+        """The whole seconds after which a unit of work that met `DatabaseUnavailable` runs
+        again: `Timeouts.acquire`, rounded up."""
+        return self._pool.retry_after
+
+    async def dedicated(self) -> Any:
+        """A connection of its own, outside the pool and its budget, with the same search path
+        and bounds. The caller closes it. Raises `ConnectionRefused` when it does not open."""
+        return await self._pool.dedicated()
 
     def connections(self) -> Connections:
         """The pool's connections now. Before the pool opens and after it closes, none in use.
         Before it first opens, a size of none. Safe to call from another thread, as a metric
         reader does."""
-        pool = self._pool
-        budget = self._budget
-        most = 0 if budget is None else budget.pool
-        if pool is None:
-            return Connections(pool=self.schema, used=0, idle=0, max_size=most)
-        idle = pool.get_idle_size()
-        return Connections(pool=self.schema, used=pool.get_size() - idle, idle=idle, max_size=most)
+        return self._pool.connections()
 
     def time_waits(self, record: Callable[[float], None]) -> None:
-        self._waited = record
+        self._pool.time_waits(record)
 
-    def _record_wait(self, started: float) -> None:
-        if self._waited is not None:
-            self._waited(time.monotonic() - started)
+    def time_uses(self, record: Callable[[float], None]) -> None:
+        self._pool.time_uses(record)
 
     def store(self, tenant_id: str) -> TaskStore:
         _refuse_unset(tenant_id)
@@ -600,61 +696,104 @@ class PostgresDatabase:
 
     def loader(self, tenant_id: str) -> Loader:
         """The loader of `tenant_id` in this request, or in this attempt of a job. Each of its
-        turns reads on one connection of `reading`. Raises `NotLoading` outside both.
+        turns reads in one block of `reading`. Raises `NotLoading` outside both.
         `docs/adr/template/0032`."""
         _refuse_unset(tenant_id)
         return loader_of((self, tenant_id), lambda: self.reading(tenant_id))
 
-    def reading(self, tenant_id: str) -> AbstractAsyncContextManager[Any]:
-        """A connection inside a READ ONLY transaction that has set `tenant_id`, which every
-        statement that only reads tenant data runs in. In a GET request that read `tenant_id`
-        first, it is the request's snapshot: one REPEATABLE READ transaction for the request, in
-        which each answer is kept. Otherwise, a transaction of its own. Inside
-        `app.store.jobs.fenced`, the transaction is not READ ONLY, and holds the claim as
-        `scoped` does.
+    def lent(self) -> AbstractAsyncContextManager[Any]:
+        """The connection of the unit of work, with no transaction of the unit's open on it: the
+        snapshot ends first. Outside a unit, a connection of its own, returned to the pool on
+        exit. It names nobody: for a block that names who acts in its own transaction, or for
+        work that writes no audited table.
 
-        A write raises `ReadOnlySQLTransactionError`. Raises as `lent` raises. A read of the
-        request's snapshot raises `ReadInsideARead` inside a read of it.
-        `docs/adr/template/0033`."""
-        return snapshots.reading(
-            (self, tenant_id),
-            lambda: self._snapshot(tenant_id),
-            lambda: self._unit(tenant_id, readonly=fence() is None),
-            failed_on_a_connection(),
-        )
+        Raises `AcquireTimedOut` when no connection comes within `Timeouts.acquire`,
+        `ConnectionRefused` when a new one does not open, and `ConnectionLost` when the block
+        fails because the connection ended. Each tells the client to ask again after
+        `Timeouts.acquire`. Raises `BlockInsideABlock` as `app.store.units.Held.refusal` says."""
+        return self._block(Need("bare"))
 
     @asynccontextmanager
-    async def _snapshot(self, tenant_id: str) -> AsyncGenerator[Any]:
-        async with (
-            self.lent() as conn,
-            conn.transaction(isolation="repeatable_read", readonly=True),
-        ):
-            await conn.execute(SET_TENANT_AND_ACTING, tenant_id, *_who_acts())
+    async def connection(self) -> AsyncGenerator[Any]:
+        """The connection of `lent`, which names who acts for its session. In a unit of work,
+        that session lasts until the unit gives the connection back. Raises as `lent`
+        raises."""
+        async with self.lent() as conn:
+            await conn.execute(SET_ACTING, *_who_acts())
             yield conn
 
-    @asynccontextmanager
-    async def scoped(self, tenant_id: str) -> AsyncGenerator[Any]:
+    def reading(self, tenant_id: str) -> AbstractAsyncContextManager[Any]:
+        """A connection inside a READ ONLY transaction that has set `tenant_id`, which every
+        statement that only reads tenant data runs in. In a GET or HEAD request, the request's
+        snapshot: one REPEATABLE READ transaction for the request, in which each answer is kept,
+        and which sets `tenant_id` before a read of it. Otherwise, a transaction of its own on
+        the unit's connection. Inside `app.store.jobs.fenced`, the transaction is not READ ONLY,
+        and holds the claim as `scoped` does.
+
+        A write raises `ReadOnlySQLTransactionError`. Raises as `lent` raises.
+        `docs/adr/template/0033`."""
+        alone = Need("read", tenant_id)
+
+        def transaction(conn: Any) -> AbstractAsyncContextManager[Any]:
+            return self._transaction(conn, tenant_id, readonly=fence() is None)
+
+        if not units.reads_a_snapshot():
+            return self._block(alone, transaction)
+
+        async def switched(conn: Any) -> None:
+            await conn.execute(SET_TENANT_AND_ACTING, tenant_id, *_who_acts())
+
+        return self._block(
+            Need("snapshot", tenant_id),
+            lambda conn: self._snapshot(conn, tenant_id),
+            switched=switched,
+            alone=(alone, transaction),
+        )
+
+    def scoped(self, tenant_id: str) -> AbstractAsyncContextManager[Any]:
         """A connection inside a transaction that has set `tenant_id`, which every statement
         that writes tenant data runs in. One statement sets the tenant and who acts, for the
-        transaction. In a GET request, `written` runs once the transaction commits.
+        transaction. In a GET request, the snapshot ends before it, so the next read opens a new
+        one that sees the write.
 
         Inside `app.store.jobs.fenced`, the transaction first holds the claim with
         `FOR KEY SHARE` until it ends, so no worker can claim the job while it runs. Raises
         `LeaseLost`, and rolls back, when the claim is no longer this attempt's, or is of another
-        tenant."""
-        async with self._unit(tenant_id, readonly=False) as conn:
-            yield conn
-        await self.written(tenant_id)
+        tenant. Raises as `lent` raises."""
+        return self._block(
+            Need("write", tenant_id),
+            lambda conn: self._transaction(conn, tenant_id, readonly=False),
+        )
 
-    async def written(self, tenant_id: str) -> None:
-        """End the request's snapshot of `tenant_id`, if it has one, so that its next read opens
-        a new snapshot, which sees each write committed before it. Call it after a write that
-        does not go through `scoped`, such as one on `connection()`."""
-        await snapshots.written((self, tenant_id))
+    def _block(
+        self,
+        need: Need,
+        opened: Opened | None = None,
+        *,
+        switched: Switched | None = None,
+        alone: tuple[Need, Opened] | None = None,
+    ) -> AbstractAsyncContextManager[Any]:
+        return units.block(
+            self,
+            self._pool,
+            need,
+            opened,
+            switched=switched,
+            alone=alone,
+            enforced=self.enforced,
+        )
 
     @asynccontextmanager
-    async def _unit(self, tenant_id: str, *, readonly: bool) -> AsyncGenerator[Any]:
-        async with self.lent() as conn, conn.transaction(readonly=readonly):
+    async def _snapshot(self, conn: Any, tenant_id: str) -> AsyncGenerator[Any]:
+        async with conn.transaction(isolation="repeatable_read", readonly=True):
+            await conn.execute(SET_TENANT_AND_ACTING, tenant_id, *_who_acts())
+            yield conn
+
+    @asynccontextmanager
+    async def _transaction(
+        self, conn: Any, tenant_id: str, *, readonly: bool
+    ) -> AsyncGenerator[Any]:
+        async with conn.transaction(readonly=readonly):
             await conn.execute(SET_TENANT_AND_ACTING, tenant_id, *_who_acts())
             claim = fence()
             if claim is not None and (
@@ -675,6 +814,4 @@ class PostgresDatabase:
             return await schema_version(conn, self.schema)
 
     async def close(self) -> None:
-        if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
+        await self._pool.close()
