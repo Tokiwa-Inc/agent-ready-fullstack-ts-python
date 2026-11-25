@@ -30,6 +30,7 @@ const RESOURCE_EVENTS = new Set(["onLoad", "onError"]);
 const RESOURCE_ELEMENTS = new Set(["img", "iframe"]);
 const FOCUS_EVENTS = new Set(["onFocus", "onBlur", "onFocusCapture", "onBlurCapture"]);
 const FORM_EVENTS = new Set(["onSubmit", "onReset"]);
+const HOVER_EVENTS = new Set(["onPointerEnter", "onPointerLeave", "onMouseEnter", "onMouseLeave"]);
 const HANDLER_NAME = /^on[A-Z]/;
 const REPORT_BYTES = 256 * 1024 * 1024;
 
@@ -130,34 +131,49 @@ function openingElementAt(node, offset) {
 }
 
 function readTree(parseAst, file) {
+  let code;
   try {
-    const code = readFileSync(file, "utf8");
-    return { code, tree: parseAst(code, { lang: "tsx" }) };
+    code = readFileSync(file, "utf8");
   } catch (error) {
     return fail(`conformance could not read ${file}: ${error.message}`);
   }
+  try {
+    return { code, tree: parseAst(code, { lang: "tsx" }) };
+  } catch (error) {
+    return fail(`conformance could not parse ${file}: ${error.message}`);
+  }
 }
 
-function handlerPasses(element, handler) {
+function treesOf(parseAst) {
+  const held = new Map();
+  return (file) => {
+    if (!held.has(file)) held.set(file, readTree(parseAst, file));
+    return held.get(file);
+  };
+}
+
+function handlerPasses(element, handler, handlers) {
   if (FOCUS_EVENTS.has(handler)) return true;
+  if (HOVER_EVENTS.has(handler)) return handlers.some((one) => FOCUS_EVENTS.has(one));
   if (FORM_EVENTS.has(handler)) return element === "form";
   return RESOURCE_EVENTS.has(handler) && RESOURCE_ELEMENTS.has(element);
 }
 
-function needsNoKeyboardRoute(parseAst, file, location) {
-  const { code, tree } = readTree(parseAst, file);
+function needsNoKeyboardRoute(read, file, location) {
+  const { code, tree } = read(file);
   const opening = openingElementAt(tree, offsetOf(code, location.start));
   if (opening === null || opening.name.type !== "JSXIdentifier") return false;
   const handlers = opening.attributes
     .filter((one) => one.type === "JSXAttribute" && one.name.type === "JSXIdentifier")
     .map((one) => one.name.name)
     .filter((name) => HANDLER_NAME.test(name));
-  return handlers.length > 0 && handlers.every((one) => handlerPasses(opening.name.name, one));
+  const element = opening.name.name;
+  return handlers.length > 0 && handlers.every((one) => handlerPasses(element, one, handlers));
 }
 
-function parserFor(diagnostics) {
+function readerFor(diagnostics) {
   if (!diagnostics.some((one) => checkOf(one).passes !== undefined)) return null;
-  return createRequire(import.meta.url)("vite").parseAst;
+  return treesOf(createRequire(import.meta.url)("vite").parseAst);
 }
 
 export function biomeViolations(files) {
@@ -165,14 +181,14 @@ export function biomeViolations(files) {
   if (linted.length === 0) return [];
   const asked = new Map(linted.map((file) => [resolve(file), file]));
   const diagnostics = diagnosticsOf(linted);
-  const parseAst = parserFor(diagnostics);
+  const read = readerFor(diagnostics);
   return diagnostics.flatMap((diagnostic) => {
     const check = checkOf(diagnostic);
     const file = asked.get(resolve(diagnostic.location.path));
     if (file === undefined) {
       fail(`biome reported ${diagnostic.location.path}, which conformance did not ask about.`);
     }
-    if (check.passes?.(parseAst, file, diagnostic.location)) return [];
+    if (check.passes?.(read, file, diagnostic.location)) return [];
     return {
       file,
       line: diagnostic.location.start.line,

@@ -31,6 +31,8 @@ describe("the conformance gate on a handler that needs no keyboard route", () =>
       "focus handlers across lines",
       "<section\n      onFocusCapture={f}\n      onBlur={f}\n    >\n      a\n    </section>",
     ],
+    ["a hover handler beside its focus twin", "<label onPointerEnter={f} onFocus={f}>a</label>"],
+    ["a focus handler after emoji and an accent on its line", "<i>😀😀😀😀é<b onBlur={f} /></i>"],
     ["a submit and a focus handler on a form", "<form onSubmit={f} onBlur={f}>a</form>"],
     [
       "a handler name inside an attribute's value",
@@ -40,11 +42,19 @@ describe("the conformance gate on a handler that needs no keyboard route", () =>
     const { rules } = scan("handled.tsx", handledBy(markup));
     expect(rules).not.toContain(HANDLER_RULE);
   });
+});
+
+describe("the conformance gate on a handler a keyboard cannot reach", () => {
+  beforeEach(conformance.open);
+
+  afterEach(conformance.close);
 
   it.each([
     ["a click on a paragraph", "<p onClick={f}>a</p>"],
     ["a key handler on a container", "<form onKeyDown={f}>a</form>"],
     ["a click beside a focus handler", "<div onBlur={f} onClick={f}>a</div>"],
+    ["a hover handler with no focus twin", "<div onMouseEnter={f}>a</div>"],
+    ["a pointer move beside a focus handler", "<div onPointerMove={f} onFocus={f}>a</div>"],
     ["a resource event on a paragraph", "<p onLoad={f}>a</p>"],
     [
       "a click after an escaped quote",

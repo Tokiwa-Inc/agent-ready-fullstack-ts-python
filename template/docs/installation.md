@@ -956,8 +956,8 @@ What to expect, because it is not all free:
 
 - **From 0.98.0 `handler-on-a-non-interactive-element` counts no handler that needs no keyboard
   route:** `onLoad` and `onError` on an `img` or an `iframe`; `onFocus` and `onBlur`, with their
-  `Capture` forms, on any element; and `onSubmit` and `onReset` on a `form`. A key handler still
-  counts. Until you lower the conformance debt, `pnpm lint:check` fails on each count the rule no
+  `Capture` forms, on any element; `onSubmit` and `onReset` on a `form`; and a hover handler beside
+  `onFocus` or `onBlur` on the same element. A key handler and a move handler still count. Until you lower the conformance debt, `pnpm lint:check` fails on each count the rule no
   longer finds. After the update, run `pnpm -C frontend lint`, and commit
   `frontend/.conformance-debt.json`. A container whose key handler the rule still counts is a
   widget: give it that widget's role, or move the handler onto the control.
