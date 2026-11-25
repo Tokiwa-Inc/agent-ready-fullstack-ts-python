@@ -204,9 +204,13 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   `@biomejs/biome` is held to one version, because a patch release can change what a nursery
   rule finds.
 - **A component file is named for what it exports**, in kebab-case: `task-list.tsx` exports
-  `TaskList`. The file name is how anything finds a component without reading it. The match
-  ignores case, so `github-screen.tsx` may export `GitHubScreen`. A name in capitals only, such
-  as `UNIT`, never names its file.
+  `TaskList`. The file name is how anything finds a component without reading it, so each
+  exported component starts with the file's name. A family shares it: `table.tsx` may export
+  `Table` and `TableRow`. The name continues at a capital or a digit, so `tab.tsx` may not export
+  `TableRow`. The match ignores case, so `github-screen.tsx` may export `GitHubScreen`. A name in
+  capitals only, such as `UNIT`, is a constant and is not checked. To fix a finding, stop
+  exporting the component if nothing outside the file uses it. Otherwise give it the file's name
+  as a prefix, or move it to its own file.
 - **Export a function, not an arrow.** `export function load()`, never
   `export const load = () => …`. A declaration names itself; an assignment does not.
 - **A file holds no more non-blank lines than `complexity.maxFileLines`**, JSX included, and

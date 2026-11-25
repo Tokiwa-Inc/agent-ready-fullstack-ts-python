@@ -217,23 +217,54 @@ describe("the conformance gate", () => {
   });
 });
 
+function exported(...names: string[]) {
+  return names.flatMap((name) => [`export function ${name}() {`, "  return null;", "}"]);
+}
+
+function exportedInList(...names: string[]) {
+  return [
+    ...names.flatMap((name) => [`function ${name}() {`, "  return null;", "}"]),
+    `export { ${names.join(", ")} };`,
+  ];
+}
+
 describe("the conformance gate on the name of a component file", () => {
   beforeEach(conformance.open);
 
   afterEach(conformance.close);
 
-  it("lets a component name its file in any case", () => {
-    const { status, rules } = scan("github-screen.tsx", [
-      "export function GitHubScreen() {",
-      "  return null;",
-      "}",
-    ]);
+  it.each([
+    ["in any case", "github-screen.tsx", exported("GitHubScreen")],
+    [
+      "as a family",
+      "dev-stack.tsx",
+      [...exported("DevStackToggle"), ...exportedInList("DevStackRow")],
+    ],
+    ["followed by a digit", "heading.tsx", exported("Heading2")],
+  ])("lets each component carry the file's name %s", (_case, file, lines) => {
+    const { status, rules } = scan(file, lines);
     expect(rules).toEqual([]);
     expect(status).toBe(0);
   });
 
-  it("does not let a constant in capitals name its file", () => {
+  it("does not check a constant in capitals", () => {
     const { status, rules } = scan("unit.tsx", ["const UNIT = 1;", "export { UNIT };"]);
+    expect(rules).toEqual([]);
+    expect(status).toBe(0);
+  });
+
+  it("reports each component that hides behind one that names the file", () => {
+    const lines = [...exported("AskBar"), ...exportedInList("Retry", "Refused")];
+    const run = conformance.run("ask-bar.tsx", lines, NO_PROJECT_RULES);
+    const found = run.lines.filter((line) => line.includes("filename-export"));
+    expect(found).toHaveLength(2);
+    expect(found.join("\n")).toContain("Retry");
+    expect(found.join("\n")).toContain("Refused");
+    expect(run.status).toBe(1);
+  });
+
+  it("does not take the start of a word as the file's name", () => {
+    const { status, rules } = scan("tab.tsx", exported("TableRow"));
     expect(rules).toEqual(["filename-export"]);
     expect(status).toBe(1);
   });
