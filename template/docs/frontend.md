@@ -201,16 +201,16 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   function from a context or a prop that sets state somewhere else. No check sees that copy.
   `AGENTS.md` forbids it.
 
-  `handler-on-a-non-interactive-element` counts a handler that a keyboard cannot reach. Four
-  kinds of handler need no keyboard route, and do not count. `onLoad` and `onError` on an `img`
-  or an `iframe` answer the resource, not a person. `onFocus` and `onBlur`, and their `Capture`
-  forms, do not count on any element: an element that cannot take focus gets a focus event only
-  from a focused control inside it. `onSubmit` and `onReset` on a `form` do not count: Enter in a
-  field submits the form. `onPointerEnter`, `onPointerLeave`, `onMouseEnter` and `onMouseLeave`
-  do not count beside `onFocus` or `onBlur` on the same element, which gives the keyboard the same
-  effect. A move handler counts: nothing moves a keyboard along with it. A key handler counts on every element: a container that handles keys is
-  a widget, and says so with that widget's role. An element that holds any other handler counts.
-  The check reads each element that Biome reports with the parser that Vite ships.
+  `handler-on-a-non-interactive-element` reports a handler that a keyboard cannot reach. It
+  reads the handlers that Biome reads, and lets an element pass when each of them needs no
+  keyboard route. `onLoad` and `onError` on an `img` or an `iframe` answer the resource, not a
+  person. `onFocus` and `onBlur` pass on any element: an element that cannot take focus gets a
+  focus event only from a focused control inside it. A hover handler, such as `onMouseEnter`,
+  passes beside `onFocus` or `onBlur` on the same element. Give the focus handler the effect of
+  the hover handler. A click, a key handler and a mouse move fail on every element: a container
+  that handles keys is a widget, and says so with that widget's role. A spread attribute can
+  hold any handler, so an element with one fails. The check finds the element with the parser
+  that Vite ships.
 
   `@biomejs/biome` is held to one version, because a patch release can change what a nursery
   rule finds.

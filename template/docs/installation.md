@@ -954,13 +954,12 @@ What to expect, because it is not all free:
     `from app.store import pages` to `from app.store import paging`. A missed import fails, and
     names the module.
 
-- **From 0.98.0 `handler-on-a-non-interactive-element` counts no handler that needs no keyboard
-  route:** `onLoad` and `onError` on an `img` or an `iframe`; `onFocus` and `onBlur`, with their
-  `Capture` forms, on any element; `onSubmit` and `onReset` on a `form`; and a hover handler beside
-  `onFocus` or `onBlur` on the same element. A key handler and a move handler still count. Until you lower the conformance debt, `pnpm lint:check` fails on each count the rule no
-  longer finds. After the update, run `pnpm -C frontend lint`, and commit
-  `frontend/.conformance-debt.json`. A container whose key handler the rule still counts is a
-  widget: give it that widget's role, or move the handler onto the control.
+- **From 0.98.0 `handler-on-a-non-interactive-element` lets a handler pass that needs no
+  keyboard route.** [docs/frontend.md](frontend.md#conventions) says which. The rule then finds
+  less than your conformance debt holds, and `pnpm lint:check` fails until you lower the debt.
+  Run `pnpm -C frontend lint`, and commit `frontend/.conformance-debt.json`. A container that the
+  rule still reports for a key handler is a widget: give it that widget's role, or move the
+  handler onto the control.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

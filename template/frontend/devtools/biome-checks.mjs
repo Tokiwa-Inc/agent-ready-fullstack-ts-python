@@ -28,10 +28,32 @@ const TYPESCRIPT_FILE = /\.tsx?$/;
 
 const RESOURCE_EVENTS = new Set(["onLoad", "onError"]);
 const RESOURCE_ELEMENTS = new Set(["img", "iframe"]);
-const FOCUS_EVENTS = new Set(["onFocus", "onBlur", "onFocusCapture", "onBlurCapture"]);
-const FORM_EVENTS = new Set(["onSubmit", "onReset"]);
-const HOVER_EVENTS = new Set(["onPointerEnter", "onPointerLeave", "onMouseEnter", "onMouseLeave"]);
-const HANDLER_NAME = /^on[A-Z]/;
+const FOCUS_EVENTS = new Set(["onFocus", "onBlur"]);
+const HOVER_EVENTS = new Set(["onMouseEnter", "onMouseLeave", "onMouseOver", "onMouseOut"]);
+const HANDLERS_BIOME_READS = new Set([
+  ...RESOURCE_EVENTS,
+  ...FOCUS_EVENTS,
+  ...HOVER_EVENTS,
+  "onKeyDown",
+  "onKeyPress",
+  "onKeyUp",
+  "onClick",
+  "onContextMenu",
+  "onDblClick",
+  "onDoubleClick",
+  "onDrag",
+  "onDragEnd",
+  "onDragEnter",
+  "onDragExit",
+  "onDragLeave",
+  "onDragOver",
+  "onDragStart",
+  "onDrop",
+  "onMouseDown",
+  "onMouseMove",
+  "onMouseUp",
+]);
+const LINE_BREAK = /\r\n|\r|\n/g;
 const REPORT_BYTES = 256 * 1024 * 1024;
 
 function checkConfig(directory) {
@@ -110,11 +132,13 @@ function checkOf(diagnostic) {
 }
 
 function offsetOf(code, { line, column }) {
-  const lines = code.split("\n");
-  const before = lines.slice(0, line - 1).reduce((sum, one) => sum + one.length + 1, 0);
+  const breaks = [...code.matchAll(LINE_BREAK)];
+  const above = breaks[line - 2];
+  const start = above === undefined ? 0 : above.index + above[0].length;
+  const text = code.slice(start, breaks[line - 1]?.index);
   return (
-    before +
-    Array.from(lines[line - 1])
+    start +
+    Array.from(text)
       .slice(0, column - 1)
       .join("").length
   );
@@ -131,15 +155,11 @@ function openingElementAt(node, offset) {
 }
 
 function readTree(parseAst, file) {
-  let code;
-  try {
-    code = readFileSync(file, "utf8");
-  } catch (error) {
-    return fail(`conformance could not read ${file}: ${error.message}`);
-  }
+  const code = readFileSync(file, "utf8");
   try {
     return { code, tree: parseAst(code, { lang: "tsx" }) };
   } catch (error) {
+    if (error.code !== "PARSE_ERROR") throw error;
     return fail(`conformance could not parse ${file}: ${error.message}`);
   }
 }
@@ -155,7 +175,6 @@ function treesOf(parseAst) {
 function handlerPasses(element, handler, handlers) {
   if (FOCUS_EVENTS.has(handler)) return true;
   if (HOVER_EVENTS.has(handler)) return handlers.some((one) => FOCUS_EVENTS.has(one));
-  if (FORM_EVENTS.has(handler)) return element === "form";
   return RESOURCE_EVENTS.has(handler) && RESOURCE_ELEMENTS.has(element);
 }
 
@@ -163,10 +182,11 @@ function needsNoKeyboardRoute(read, file, location) {
   const { code, tree } = read(file);
   const opening = openingElementAt(tree, offsetOf(code, location.start));
   if (opening === null || opening.name.type !== "JSXIdentifier") return false;
+  if (opening.attributes.some((one) => one.type === "JSXSpreadAttribute")) return false;
   const handlers = opening.attributes
-    .filter((one) => one.type === "JSXAttribute" && one.name.type === "JSXIdentifier")
+    .filter((one) => one.name.type === "JSXIdentifier")
     .map((one) => one.name.name)
-    .filter((name) => HANDLER_NAME.test(name));
+    .filter((name) => HANDLERS_BIOME_READS.has(name));
   const element = opening.name.name;
   return handlers.length > 0 && handlers.every((one) => handlerPasses(element, one, handlers));
 }
