@@ -954,6 +954,12 @@ What to expect, because it is not all free:
     `from app.store import pages` to `from app.store import paging`. A missed import fails, and
     names the module.
 
+- **From 0.97.1 `handler-on-a-non-interactive-element` lets two kinds of handler pass:**
+  `onLoad` and `onError` on an `img` or an `iframe`, and `onFocus`, `onBlur`, `onKeyDown` and
+  `onKeyUp` on a `form`, `fieldset`, `table` or `label`. After the update, run
+  `pnpm -C frontend lint`. It lowers each count of the conformance debt that the rule no longer
+  finds. Commit `frontend/.conformance-debt.json`.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

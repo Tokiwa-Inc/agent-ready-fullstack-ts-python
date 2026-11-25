@@ -135,6 +135,16 @@ function scan(name: string, lines: string[], rulesModule = NO_PROJECT_RULES, arg
   return { status, stdout, stderr, rules: [...new Set(rules)].sort() };
 }
 
+const HANDLER_RULE = "handler-on-a-non-interactive-element";
+
+function handledBy(markup: string) {
+  return [
+    "export function Handled({ f }: { f: () => void }) {",
+    `  return (\n    ${markup}\n  );`,
+    "}",
+  ];
+}
+
 describe("the conformance gate on what biome finds", () => {
   beforeEach(conformance.open);
 
@@ -143,6 +153,31 @@ describe("the conformance gate on what biome finds", () => {
   it("fires every rule biome finds on markup that breaks all of them", () => {
     const { status, rules } = scan("copied.tsx", COPIED);
     expect(rules).toEqual(BIOME_RULES);
+    expect(status).toBe(1);
+  });
+
+  it.each([
+    ["a resource event on an image", "<img src='a.png' alt='' onLoad={f} />"],
+    ["a resource event on a frame", "<iframe src='a.html' title='a' onError={f} />"],
+    ["a focus handler on a fieldset", "<fieldset onBlur={f}>a</fieldset>"],
+    ["a key handler on a table", "<table onKeyDown={f}><tbody /></table>"],
+    [
+      "key handlers on a form across lines",
+      "<form\n      onKeyDown={f}\n      onKeyUp={f}\n    >\n      a\n    </form>",
+    ],
+  ])("lets %s pass", (_case, markup) => {
+    const { rules } = scan("handled.tsx", handledBy(markup));
+    expect(rules).not.toContain(HANDLER_RULE);
+  });
+
+  it.each([
+    ["a click on a paragraph", "<p onClick={f}>a</p>"],
+    ["a pointer move on a drawing", "<svg onMouseMove={f} />"],
+    ["a click beside a key handler on a form", "<form onKeyDown={f} onClick={f}>a</form>"],
+    ["a resource event on a paragraph", "<p onLoad={f}>a</p>"],
+  ])("reports %s", (_case, markup) => {
+    const { status, rules } = scan("handled.tsx", handledBy(markup));
+    expect(rules).toContain(HANDLER_RULE);
     expect(status).toBe(1);
   });
 

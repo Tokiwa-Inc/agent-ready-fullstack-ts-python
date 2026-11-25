@@ -199,7 +199,11 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   apply to them. `react-compiler` sees a setter that an effect calls, a function of the
   component that calls one, and a function whose name starts with `set`. It does not see a
   function from a context or a prop that sets state somewhere else. No check sees that copy.
-  `AGENTS.md` forbids it.
+  `AGENTS.md` forbids it. `handler-on-a-non-interactive-element` lets two kinds of handler pass.
+  `onLoad` and `onError` on an `img` or an `iframe` answer the resource, not a person. A focus or
+  key handler on a `form`, `fieldset`, `table` or `label` catches the events of the controls
+  inside it, and the keyboard reaches those controls. An element that also holds any other
+  handler still fails.
 
   `@biomejs/biome` is held to one version, because a patch release can change what a nursery
   rule finds.

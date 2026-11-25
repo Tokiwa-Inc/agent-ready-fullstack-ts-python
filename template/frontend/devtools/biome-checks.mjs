@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fail } from "./gate.mjs";
@@ -14,6 +14,7 @@ export const BIOME_CHECKS = [
     name: "handler-on-a-non-interactive-element",
     biome: "a11y/noNoninteractiveElementInteractions",
     hint: "a keyboard cannot reach a handler on a list item, a paragraph or a landmark. Put the handler on a button or a link, or on a primitive that is one",
+    excuses: (file, location) => needsNoKeyboardRoute(file, location),
   },
   {
     name: "query-result-rest",
@@ -23,6 +24,13 @@ export const BIOME_CHECKS = [
 ];
 
 const TYPESCRIPT_FILE = /\.tsx?$/;
+
+const RESOURCE_EVENTS = new Set(["onLoad", "onError"]);
+const RESOURCE_ELEMENTS = new Set(["img", "iframe"]);
+const FOCUS_AND_KEY_EVENTS = new Set(["onFocus", "onBlur", "onKeyDown", "onKeyUp"]);
+const CONTAINERS = new Set(["form", "fieldset", "table", "label"]);
+const OPENING_TAG = /^<([A-Za-z][\w.]*)/;
+const HANDLER = /\b(on[A-Z]\w*)\s*=/g;
 const REPORT_BYTES = 256 * 1024 * 1024;
 
 function checkConfig(directory) {
@@ -100,16 +108,43 @@ function checkOf(diagnostic) {
   return check;
 }
 
+function openingTag(file, location) {
+  const lines = readFileSync(file, "utf8").split("\n");
+  const { start, end } = location;
+  if (start.line === end.line) {
+    return lines[start.line - 1].slice(start.column - 1, end.column - 1);
+  }
+  return [
+    lines[start.line - 1].slice(start.column - 1),
+    ...lines.slice(start.line, end.line - 1),
+    lines[end.line - 1].slice(0, end.column - 1),
+  ].join("\n");
+}
+
+function excused(element, handler) {
+  if (RESOURCE_EVENTS.has(handler)) return RESOURCE_ELEMENTS.has(element);
+  return FOCUS_AND_KEY_EVENTS.has(handler) && CONTAINERS.has(element);
+}
+
+function needsNoKeyboardRoute(file, location) {
+  const tag = openingTag(file, location);
+  const element = OPENING_TAG.exec(tag)?.[1];
+  const handlers = [...tag.matchAll(HANDLER)].map((found) => found[1]);
+  if (element === undefined || handlers.length === 0) return false;
+  return handlers.every((handler) => excused(element, handler));
+}
+
 export function biomeViolations(files) {
   const linted = files.filter((file) => TYPESCRIPT_FILE.test(file));
   if (linted.length === 0) return [];
   const asked = new Map(linted.map((file) => [resolve(file), file]));
-  return diagnosticsOf(linted).map((diagnostic) => {
+  return diagnosticsOf(linted).flatMap((diagnostic) => {
     const check = checkOf(diagnostic);
     const file = asked.get(resolve(diagnostic.location.path));
     if (file === undefined) {
       fail(`biome reported ${diagnostic.location.path}, which conformance did not ask about.`);
     }
+    if (check.excuses?.(file, diagnostic.location)) return [];
     return {
       file,
       line: diagnostic.location.start.line,
