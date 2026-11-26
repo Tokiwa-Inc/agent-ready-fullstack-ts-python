@@ -1,0 +1,7 @@
+/openapi.json linguist-generated regenerate=openapi
+/frontend/src/api/schema.ts linguist-generated regenerate=openapi
+/frontend/src/api/parts.ts linguist-generated regenerate=openapi
+/deploy/schema.sql linguist-generated regenerate=schema
+/deploy/roles.sql linguist-generated regenerate=roles
+/backend/.schema-baseline.json regenerate=schema
+/frontend/.conformance-debt.json regenerate=conformance-debt

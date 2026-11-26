@@ -146,6 +146,11 @@ What to expect, because it is not all free:
   code, so an update never touches them. `make openapi` rewrites the first two and `make lint`
   the third; if `make lint` reports that complexity rose past the tolerance, the template's
   code is why, and the message says how to record it.
+- **Keep your own `.gitattributes` lines.** From 0.100.0 the template owns the root
+  `.gitattributes`. If your project has one, the update can conflict in it. Keep the template's
+  lines and yours. A line for the files of one directory can move to a `.gitattributes` in that
+  directory, and then a later update does not conflict on it:
+  [development.md](development.md#generated-files).
 - **Regenerate the schema artifacts too.** `deploy/schema.sql` and `backend/.schema-baseline.json`
   are generated from your `ddl.py`, which by then holds your entries as well as the template's.
   A merged copy of either describes neither project, and `make pre-commit` says so. `make schema`

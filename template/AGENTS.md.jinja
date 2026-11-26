@@ -84,8 +84,10 @@ fans out to both. Each half works without the other's toolchain.
 
 **Every change**
 
-- Never hand-edit or hand-merge a generated file. Take a side and regenerate: `make openapi` for
-  the contract, `make schema` and `make roles` for `deploy/`.
+- Never hand-edit or hand-merge a generated file. On a merge conflict in a file that
+  `.gitattributes` gives `regenerate=<target>`, take the default branch's copy and run that
+  target. A new generated file gets a line:
+  [docs/development.md](docs/development.md#generated-files) says where.
 - Run `make pre-commit`, then commit. The commit gate runs once per tree.
 - An agent that commits through an API runs no hook. It runs `make pre-commit` on the exact tree
   before it commits.
@@ -243,7 +245,7 @@ needs and how to work in one half.
 | [CONTEXT.md](CONTEXT.md) | the glossary, and why renaming `tenant_id` is a day-one decision |
 | [docs/frontend.md](docs/frontend.md) | the frontend tree, vendored code, the theme and the conventions |
 | [docs/backend.md](docs/backend.md) | the backend tree, the contract, the conventions, the store and the schema |
-| [docs/development.md](docs/development.md) | the root tree, the gate, the tiers, the comment ban, working in one half, stopping what a script started |
+| [docs/development.md](docs/development.md) | the root tree, the gate, generated files, the tiers, the comment ban, working in one half, stopping what a script started |
 | [docs/schema.md](docs/schema.md) | what the migration system is, what it will not do, and how to move to Alembic |
 | [docs/deployment.md](docs/deployment.md) | serving the two halves, the release step, and ways to ship something broken |
 | [docs/installation.md](docs/installation.md) | prerequisites, and taking a later template update |

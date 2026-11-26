@@ -621,7 +621,7 @@ for target in install hooks pre-commit gate gate-commit suite test-commit secret
               test-e2e test-e2e-live db-test observe observe-test db db-demo migrate roles \
               schema dev \
               dev-frontend dev-backend \
-              openapi openapi-check build upgrade clean; do
+              openapi openapi-check conformance-debt build upgrade clean; do
     grep -q "^$target:" Makefile || { echo "Makefile is missing the $target target" >&2; exit 1; }
 done
 need_grep '^gate: secrets lint-check openapi-check test$' Makefile
@@ -961,6 +961,7 @@ need deploy/schema.sql
 need deploy/roles.sql
 need backend/.schema-baseline.json "Without it, make schema re-records an edited body, and the gate stops refusing an edited shipped entry"
 need deploy/compose.yaml
+need .gitattributes "Without it, nothing names the files a merge conflict regenerates, and make openapi-check fails"
 need_exec deploy/credentials.sh
 need CONTEXT.md
 need_only f docs/adr/template \
@@ -1856,9 +1857,96 @@ fi
 rm -f "$PLANTED"
 
 echo "==> assert the contract artifacts are in sync with the code"
-run "make openapi" make openapi
-git diff --exit-code -- openapi.json frontend/src/api/schema.ts frontend/src/api/parts.ts \
-    || { echo "the committed contract artifacts do not match the rendered code" >&2; exit 1; }
+run "make openapi-check" make openapi-check
+printf 'drift\n' >>frontend/src/api/parts.ts
+git add frontend/src/api/parts.ts
+if make openapi-check >"$WORK/step.log" 2>&1; then
+    fail "make openapi-check passed with a committed parts.ts that make openapi does not write. A check that never fires passes forever."
+fi
+grep -q 'frontend/src/api/parts.ts' "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "make openapi-check failed without naming the parts.ts that drifted"; }
+git reset -q -- frontend/src/api/parts.ts
+git diff --quiet || fail "make openapi did not give back parts.ts"
+
+echo "==> each target .gitattributes names writes only its files, and resolves a conflict from the default branch's copy"
+python3 - "$WORK/step.log" <<'PY'
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+log = Path(sys.argv[1])
+
+
+def git(*args: str) -> list[str]:
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout.splitlines()
+
+
+def make(target: str) -> None:
+    with log.open("w") as out:
+        ran = subprocess.run(["make", target], stdout=out, stderr=subprocess.STDOUT)
+    if ran.returncode != 0:
+        sys.exit(f"make {target} failed:\n{log.read_text()}")
+
+
+def unchanged(after: str, meaning: str) -> None:
+    drift = git("status", "--porcelain", "--untracked-files=no")
+    if drift:
+        changed = ", ".join(line[3:] for line in drift)
+        sys.exit(f"{after} changed {changed}. {meaning}")
+
+
+def git_z(*args: str, given: str = "") -> list[str]:
+    ran = subprocess.run(["git", *args, "-z"], input=given, capture_output=True, text=True, check=True)
+    return ran.stdout.split("\0")[:-1]
+
+
+tracked = git_z("ls-files")
+answer = git_z("check-attr", "--stdin", "regenerate", given="".join(f"{path}\0" for path in tracked))
+targets: dict[str, list[str]] = {}
+for path, _, value in zip(answer[0::3], answer[1::3], answer[2::3]):
+    if value not in ("unspecified", "unset", "set"):
+        targets.setdefault(value, []).append(path)
+expected = {
+    "openapi": ["frontend/src/api/parts.ts", "frontend/src/api/schema.ts", "openapi.json"],
+    "schema": ["backend/.schema-baseline.json", "deploy/schema.sql"],
+    "roles": ["deploy/roles.sql"],
+    "conformance-debt": ["frontend/.conformance-debt.json"],
+}
+found = {target: sorted(paths) for target, paths in targets.items()}
+if found != expected:
+    sys.exit(f".gitattributes names {found}, and this check expects {expected}. Change both, or neither.")
+
+for target, paths in targets.items():
+    before = {path: os.stat(path).st_mtime_ns for path in tracked}
+    make(target)
+    written = sorted(path for path, stamp in before.items() if os.stat(path).st_mtime_ns != stamp)
+    stray = sorted(set(written) - set(paths))
+    if stray:
+        sys.exit(f"make {target} writes {stray}, and .gitattributes does not give them regenerate={target}. A conflict in one has no mechanical resolution.")
+    unchanged(f"make {target} on a clean tree", "The committed file is not what its target writes.")
+
+for target, paths in targets.items():
+    for path in paths:
+        if git("check-attr", "linguist-generated", "--", path)[0].endswith(": set"):
+            Path(path).write_text("<<<<<<< a conflict\n")
+            make(target)
+            unchanged(f"make {target} after {path} lost its content", "The target does not write the whole file.")
+
+baseline = Path("backend/.schema-baseline.json")
+entries = json.loads(baseline.read_text())
+last = sorted(entries)[-1]
+baseline.write_text(json.dumps({key: value for key, value in entries.items() if key != last}, indent=2) + "\n")
+make("schema")
+unchanged(f"make schema after the schema baseline lost {last}", "A default branch's copy without that entry does not get it back.")
+
+debt = Path("frontend/.conformance-debt.json")
+owed = json.loads(debt.read_text())
+owed["files"] = {**owed["files"], "src/main.tsx": {owed["rules"][0]: 1}}
+debt.write_text(json.dumps(owed, indent=2) + "\n")
+make("conformance-debt")
+unchanged("make conformance-debt after the conformance debt owed one more finding", "A default branch's copy that owes a finding the merge fixed keeps it.")
+PY
 
 echo "==> the contract suite, against both implementations"
 run "contract suite (mocks)" pnpm -C frontend test:contract

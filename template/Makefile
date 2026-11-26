@@ -12,7 +12,7 @@ E2E_BROWSERS ?= chromium
         test-e2e test-e2e-live db-test test-contract-db db db-demo migrate roles schema \
         dev dev-frontend observe observe-test \
         dev-backend openapi \
-        openapi-check build upgrade clean
+        openapi-check conformance-debt build upgrade clean
 
 default: install lint pre-commit
 
@@ -165,10 +165,15 @@ openapi:
 	pnpm -C frontend openapi:types
 
 openapi-check: openapi
-	@git diff --exit-code -- openapi.json frontend/src/api/schema.ts frontend/src/api/parts.ts \
+	@git ls-files ':(attr:regenerate=openapi)' | grep -q . \
+	  || { echo "No tracked file carries regenerate=openapi. Commit .gitattributes and the contract artifacts." >&2; exit 1; }
+	@git diff --exit-code -- ':(attr:regenerate=openapi)' \
 	  || { echo "" >&2; \
 	       echo "The contract artifacts do not match the backend code." >&2; \
 	       echo "Run 'make openapi' and commit the result." >&2; exit 1; }
+
+conformance-debt:
+	pnpm -C frontend conformance --tighten
 
 build:
 	pnpm -C frontend build
