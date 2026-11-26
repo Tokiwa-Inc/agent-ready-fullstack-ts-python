@@ -197,6 +197,7 @@ the failure it catches otherwise looks like working software.
 | Category | What must hold | Enforced by |
 |---|---|---|
 | **Contract freshness** | the committed spec and generated types match the backend code | `make openapi-check`, in the gate; `adr/template/0008` for the settings it depends on |
+| **Conflicts resolve without a person** | each target that `.gitattributes` names writes only its files, and gives back the committed file from the default branch's copy | `check_template.sh`; a project's own line has no check |
 | **Two implementations, one contract** | the [MSW](https://mswjs.io/) handlers and the real backend answer alike | one contract suite, run against both |
 | **Typed mocks** | a handler cannot return a status code or shape the spec does not declare | openapi-msw, at compile time |
 | **Mock mode leaves no trace** | a production build ships no worker and no msw bundle | a build assertion in the gate |

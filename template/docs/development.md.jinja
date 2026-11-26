@@ -1,8 +1,8 @@
 # Development
 
-[AGENTS.md](../AGENTS.md) holds the rules nothing checks. This is the root of the tree, the gate
-and the tiers, the comment ban, how to work in one half, and how a script stops what it
-started. [frontend.md](frontend.md) and [backend.md](backend.md) hold the two halves.
+[AGENTS.md](../AGENTS.md) holds the rules nothing checks. This is the root of the tree, the gate,
+generated files, the tiers, the comment ban, how to work in one half, and how a script stops what
+it started. [frontend.md](frontend.md) and [backend.md](backend.md) hold the two halves.
 
 ## The two halves
 
@@ -142,6 +142,31 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   `backend/.startup-baseline.json` allows, and names the packages that grew.
   [deployment.md](deployment.md#a-cold-start) says why the count costs, and how to record a
   rise.
+
+## Generated files
+
+`.gitattributes` names each committed file that a `make` target writes, and that target:
+`regenerate=<target>`. A generated file is one that its target writes from the tree alone. It
+also carries `linguist-generated`, so GitHub folds its diff. The schema baseline and the
+conformance debt do not: a reviewer reads each change to them.
+
+- **Resolve a conflict in one by its target, never by hand.** Take the default branch's copy of
+  each conflicted file. When you merge the default branch into yours, that copy is
+  `git checkout --theirs -- <file>`. Run `make <target>` once for each target, then the gate.
+  The default branch's schema baseline lacks each entry that only your branch recorded, and
+  `make schema` adds it. The default branch's conformance debt can owe a finding that your branch
+  fixed, and `make conformance-debt` lowers that count. When the gate then fails, the targets
+  cannot resolve this conflict. Either the source conflicts too, or your branch raised the debt.
+  Merge that change by hand.
+- **A file with no `regenerate=` has no mechanical resolution.** Merge it by hand.
+- **The default branch's attributes decide.** A tool that resolves conflicts must read them from
+  the default branch's tree: `git check-attr --source=<default branch> regenerate -- <file>`.
+  Then a branch cannot add a line that resolves its own conflict.
+- **A new generated file gets a line.** The root `.gitattributes` belongs to the template, and
+  your line there can conflict on a later `copier update`. Put it in a `.gitattributes` in the
+  file's own directory, such as `backend/app/generated/.gitattributes`. git reads each one, with
+  paths relative to its directory. `make openapi-check` compares each file that carries
+  `regenerate=openapi`.
 
 ## The tiers
 
