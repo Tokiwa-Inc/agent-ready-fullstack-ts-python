@@ -18,7 +18,7 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: `http://localhost:${FRONTEND_PORT}/`,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });
