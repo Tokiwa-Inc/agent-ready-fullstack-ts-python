@@ -429,6 +429,14 @@ them there. Yours go in `docs/adr/` itself, numbered from `0001`. Each file's na
 decision it records, so the directory listing is the index. Its
 [README](docs/adr/README.md) says what belongs there and how to write one.
 
+## Unfinished work
+
+**Follow-up**:
+Work that a merged change left half-finished. Each follow-up is one file in `todo/`, and the
+change that finishes it deletes that file.
+_Avoid_: entry, task (each one already names something else here), ticket, issue (each one names
+an item in an issue tracker, and a follow-up is a file in the repository).
+
 ## Verification
 
 **Commit gate**: `make gate-commit`, run by the hook through `make pre-commit`.
