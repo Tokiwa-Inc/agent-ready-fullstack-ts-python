@@ -221,25 +221,29 @@ python3 "$REPO/devtools/links.py" "$OUT" \
     --allow-orphan README.md --allow-orphan CLAUDE.md \
     || fail "the generated project names a document that does not exist, or orphans one."
 
-echo "==> assert decision records are numbered from 0001 with no gaps"
-numbered_without_gaps() {
-    expected=1
+echo "==> assert no two decision records share a number, and each heading names its file's number"
+numbered_once() {
+    seen=""
     for record in "$1"/[0-9][0-9][0-9][0-9]-*.md; do
         [ -e "$record" ] || return 0
-        want="$(printf '%04d' "$expected")"
-        [ "$(basename "$record" | cut -c1-4)" = "$want" ] \
-            || fail "$1: record $want is next, and $(basename "$record") is there. The numbers are a reading order (docs/adr/README.md). Renumber, and update every citation in the tree in the same change."
-        expected=$((expected + 1))
+        number="$(basename "$record" | cut -c1-4)"
+        case " $seen " in
+            *" $number "*) fail "$1: two records take $number. The later one takes the number after the highest (docs/adr/README.md), and every citation of it changes in the same change." ;;
+        esac
+        seen="$seen $number"
+        head -n 1 "$record" | grep -q "^# $number\\. " \
+            || fail "$record: its heading does not start with '# $number.'."
     done
 }
-GAPPED="$(mktemp -d)"
-touch "$GAPPED/0001-a.md" "$GAPPED/0003-c.md"
-if (numbered_without_gaps "$GAPPED") 2>/dev/null; then
-    fail "numbered_without_gaps passed a gap, so the sweep below would prove nothing."
+TWICE="$(mktemp -d)"
+printf '# 0001. A\n' >"$TWICE/0001-a.md"
+printf '# 0001. B\n' >"$TWICE/0001-b.md"
+if (numbered_once "$TWICE") 2>/dev/null; then
+    fail "numbered_once passed a number held twice, so the sweep below would prove nothing."
 fi
-rm -rf "$GAPPED"
+rm -rf "$TWICE"
 for records in "$REPO/docs/adr" "$OUT/docs/adr/template" "$OUT/docs/adr"; do
-    numbered_without_gaps "$records"
+    numbered_once "$records"
 done
 
 echo "==> assert the code the template owns stands without the identity stub"
