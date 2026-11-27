@@ -42,12 +42,12 @@ one word for one meaning in its bounded context. Do not use idioms or metaphors.
 **A record states the decision as it is now.** When the decision changes, change the record. Git
 holds the earlier text. Do not add dated amendments, and do not tell the history of the decision.
 
-**Numbers are a reading order.** Records are numbered from 0001 with no gaps, in the order a
-newcomer should read them. When records merge, go away or move, renumber them, and update every
-citation in the tree in the same change. A citation in git history, an old commit or a transcript
-may then point at a different record. That is accepted: the tree is the source of truth. A shipped
-migration entry cannot change, so a citation inside one can point at the wrong record too. If two
-branches add or move records at once, the later merge renumbers.
+**A record keeps its number.** A new record takes the number after the highest one in this
+directory. When records merge or one goes away, the others keep their numbers, and there is a gap.
+Update every citation of a record that merged or went away in the same change: it names the record
+that now holds the decision, or the place its rule moved to. So a citation never points at a
+different record, and a branch that cites a record still means that record after it merges. If two
+branches each add a record, they take the same number, and the later merge takes the next one.
 
 **Cite nothing by section number, and count nothing that lives elsewhere.** Name the thing: the
 route, the function, the rule or the invariant. A section number points into one revision of one
