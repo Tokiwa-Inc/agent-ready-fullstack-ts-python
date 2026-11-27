@@ -1189,6 +1189,7 @@ need_grep 'required-version = ">=0.11.25"' backend/pyproject.toml 'An older uv r
 need_grep 'UV_EXCLUDE_NEWER' Makefile
 need_absent frontend/pnpm-lock.yaml
 need_absent backend/uv.lock
+need_absent todo "A project may keep its own README in todo/, and a template file in todo/ conflicts with it on each copier update."
 need_grep 'pnpm-lock.yaml' docs/installation.md "No lockfile ships, so the setup instructions must say to commit the ones make install writes."
 
 echo "==> assert hook activation is worktree-safe"

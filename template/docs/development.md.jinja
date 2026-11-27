@@ -1,8 +1,8 @@
 # Development
 
 [AGENTS.md](../AGENTS.md) holds the rules nothing checks. This is the root of the tree, the gate,
-generated files, the tiers, the comment ban, how to work in one half, and how a script stops what
-it started. [frontend.md](frontend.md) and [backend.md](backend.md) hold the two halves.
+generated files, follow-ups, the tiers, the comment ban, how to work in one half, and how a script
+stops what it started. [frontend.md](frontend.md) and [backend.md](backend.md) hold the two halves.
 
 ## The two halves
 
@@ -16,6 +16,7 @@ Makefile              the interface across both halves
 CONTEXT.md            the vocabulary
 docs/adr/             architectural decisions, as its README defines them;
                       template/ holds the ones that came with the template
+todo/                 follow-ups -- one file for each, and no index
 frontend/             everything pnpm touches
 backend/              everything uv touches
 deploy/               schema.sql and roles.sql -- generated from app/store/
@@ -167,6 +168,21 @@ conformance debt do not: a reviewer reads each change to them.
   file's own directory, such as `backend/app/generated/.gitattributes`. git reads each one, with
   paths relative to its directory. `make openapi-check` compares each file that carries
   `regenerate=openapi`.
+
+## Follow-ups
+
+`todo/` holds what merged work left half-finished. Each follow-up is one file,
+`todo/<what-is-left>.md`. The file name is the title in lower case, with hyphens between the
+words. A decision record's file name is made the same way, after its number. The file holds
+`# <the title>` and then the body.
+
+- **There is no index, no order and no number.** Two branches that each add a follow-up add two
+  files, and git merges them without a conflict. A shared list or an index file puts each
+  branch's edit on the same lines again. A number makes two branches take the same number,
+  and one of them must renumber.
+- **The change that finishes a follow-up deletes its file.** git holds the text.
+- **The template ships no file in `todo/`.** So `copier update` never conflicts there. A
+  `README.md` in `todo/` is the project's own, and it is not a follow-up.
 
 ## The tiers
 
