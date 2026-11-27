@@ -143,6 +143,11 @@ CI calls the full target directly, so a missing half fails.
 ## Consequences
 
 A successful commit gate does not prove that the full suite passed.
+A test can pass on one run of a tree and fail on another.
+No test runner runs a failed test again.
+A run in which a test fails records no pass.
+A later run of the same tree can pass, and the runner records that pass as final.
+So a retry that passes hides the fault.
 The frontend configuration separates Node tests from DOM setup.
 The full target includes every default test, the live contract suite and the production build.
 A release caller binds its result to the exact source revision and stops on failure or absence.
