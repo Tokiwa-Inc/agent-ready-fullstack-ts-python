@@ -116,7 +116,7 @@ async def run(claims: JobClaims, claim: Claim) -> None:
     before the lease would end stops it too, and `log.attempt_abandoned` names it: the lease ends,
     and the next claim runs the job again. A step is the read of what the job asked, or a write
     that ends the attempt. The attempt is one unit of work, named `job <kind>`, and its steps and
-    its handler share its connection. Each renewal of the lease is a unit of work of its own,
+    the store calls of its handler are blocks of it. Each renewal of the lease is a unit of work of its own,
     which waits for no block of the attempt."""
     held = _Held(claim.held_until)
     try:

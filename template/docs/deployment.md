@@ -400,10 +400,11 @@ because recording it would wait for a connection too.
 says why.
 
 **Each unit of work holds one connection.** A request, an attempt of a job, a run of shared work
-and a task beside the requests each hold at most one, from their first use of the database until
-they end, the response starts, or they wait through `app.waits.waiting`. The session check, the
-snapshot and the request event of one request share it. So in a burst, each request waits for a
-connection, and the burst never locks the pool. Size the pool for the units that run at once.
+and a task beside the requests each hold at most one, and only while a block runs. A GET or HEAD
+request holds its connection from its first block until its response starts, or until it waits
+through `app.waits.waiting`. Its session check, snapshot and request event share it. So in a
+burst, each unit waits for a connection, and the burst never locks the pool. Size the pool for
+the blocks and the GET requests that run at once.
 [adr/template/0034](adr/template/0034-a-unit-of-work-holds-one-connection.md)
 says why.
 
@@ -418,7 +419,7 @@ The log names who holds the pool:
 
 **Measure before you enforce.** A project whose code took a second connection inside a unit gets
 `BlockInsideABlock`, a `500`, from the first request that does so. `UNIT_OF_WORK_MODE=evaluate`
-lends that block a second connection instead, keeps the connection across a wait inside a block,
+lends that block a second connection instead, holds the connection across a wait inside a block,
 and writes `unit of work would refuse`, which names the route and the code. Run `evaluate` until
 the line stops, fix each place it names, then unset the variable. `enforce` is the default.
 
@@ -611,8 +612,8 @@ backend spells its own way (`http_server_request_duration_seconds` in Prometheus
 `db.client.connection.count` reports the pool's connections by state (`used`, `idle`), and
 `db.client.connection.max` reports the most it will open. Used near the maximum means requests
 are waiting for a connection, and `AcquireTimedOut` in the log follows.
-`db.client.connection.use_time` reports how long each connection was lent, in seconds: a unit of
-work holds one from its first block until it gives it back. A p99 near `DATABASE_ACQUIRE_TIMEOUT`
+`db.client.connection.use_time` reports how long each connection was lent, in seconds: one block,
+or a GET or HEAD request from its first block until its response starts. A p99 near `DATABASE_ACQUIRE_TIMEOUT`
 names units that hold the pool while others wait. `connection held` names each one.
 `db.client.connection.wait_time` reports how long each wait for a connection took, in seconds:
 the waits that ended in a connection, and the ones that ended in `AcquireTimedOut`. Each wait

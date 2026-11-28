@@ -247,9 +247,10 @@ backend/
   and only shrinks. No list names a route that holds more than one connection.
   [adr/template/0032](adr/template/0032-a-request-s-reads-do-not-grow-with-its-rows.md) says why.
 - **A unit of work holds one connection.** Each request, attempt of a job, run of shared work and
-  task of work beside the requests is a unit of work. It holds at most one connection, and each
-  store call is a block on it. Call a system outside the process only inside `app.waits.waiting`,
-  which gives the connection back first. `tests/waits/test_the_only_door.py` holds this for each
+  task of work beside the requests is a unit of work. It holds at most one connection, and only
+  while a block runs: each store call is a block. A GET or HEAD request holds its connection until
+  its response starts. Call a system outside the process only inside `app.waits.waiting`, which
+  gives that connection back first. `tests/waits/test_the_only_door.py` holds this for each
   client of a module that it names. A block that cannot share the transaction of the block it is
   inside raises `BlockInsideABlock`, and `UNIT_OF_WORK_MODE=evaluate` reports it in place of the
   refusal. Never take a connection from asyncpg: only `Pool` in `app/store/pg.py` does.

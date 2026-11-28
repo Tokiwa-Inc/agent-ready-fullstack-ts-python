@@ -45,18 +45,18 @@ each store method records its own event holds only for the stores that remember 
   `ACTING_GUCS`, and raises when no actor issuer or subject is set.
   `test_a_write_with_no_actor_is_refused_and_changes_nothing` holds this.
 - **A transaction names who acts in the statement that sets the tenant.** `scoped` in
-  `app/store/pg.py` runs on the connection of the unit of work
-  ([0034](0034-a-unit-of-work-holds-one-connection.md)), which names
+  `app/store/pg.py` runs in a block of the unit of work
+  ([0034](0034-a-unit-of-work-holds-one-connection.md)), on a connection that names
   nobody. The first statement of its transaction, `SET_TENANT_AND_ACTING`, sets the tenant and every
   one of `ACTING_GUCS` for the transaction. A store call then costs 4 round trips: `BEGIN`, that
-  statement, its own statement and `COMMIT`. The pool's reset costs one more for the unit.
+  statement, its own statement and `COMMIT`. The pool's reset costs one more when the connection
+  goes back.
   `test_a_store_call_sets_the_tenant_and_who_acts_in_one_statement` holds this.
 - **A connection from `connection()` names who acts for its session.** `connection()` sets
   every one of `ACTING_GUCS` on each connection it lends, for a project's own transaction or a
   statement outside one. `test_a_connection_lent_outside_a_transaction_names_who_acts` holds
   this. A connection from `lent()` names nobody until a transaction or `connection()` does, so a
-  write on it is refused. In a unit of work, the session setting lasts until the unit gives the
-  connection back.
+  write on it is refused. The session setting lasts until the connection goes back to the pool.
 - **Each setting comes from the task that acts.** The values are `audit_events.current_actor()` and
   the request id and trace id in `app/log.py`. Each one is empty when nothing is known. The pool's
   reset clears each session setting when a connection comes back, so a connection lent to another

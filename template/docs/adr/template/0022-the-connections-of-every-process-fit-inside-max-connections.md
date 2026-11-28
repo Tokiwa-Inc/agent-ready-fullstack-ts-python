@@ -74,9 +74,9 @@ covered a full pool, not a server that refuses.
 - **A request that the database does not serve records no request event.** Recording it would
   wait for the database too. [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) says so.
 - **The same holds when the database does not serve the request event.** Each request a
-  principal makes records its event after its route has answered, on the connection of its unit
-  of work ([0034](0034-a-unit-of-work-holds-one-connection.md)). A
-  request whose route used no connection takes one for its event.
+  principal makes records its event after its route has answered, in a block of its unit of work
+  ([0034](0034-a-unit-of-work-holds-one-connection.md)). A GET or HEAD request records it on the
+  connection that it holds, if it holds one. Any other request takes a connection for its event.
   `RecordsRequests` in `app/request_events.py` sends the same `503` in place of the route's
   response. `test_a_request_whose_event_got_no_connection_is_refused_with_a_time_to_ask_again`
   holds this.

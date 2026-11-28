@@ -1005,6 +1005,19 @@ What to expect, because it is not all free:
   template's lines in the conflict. Then make `include` hold the paths that your `SRC_PATHS` held.
   The three tools do not check a path that is not in `include`, and nothing reports it.
 
+- **From 0.105.0 a unit of work holds a connection only while a block runs.** A wait between two
+  blocks, of any kind, holds none. A GET or HEAD request still holds its connection until its
+  response starts. [adr/template/0034](adr/template/0034-a-unit-of-work-holds-one-connection.md)
+  says why. After the update:
+  - A session setting outside a GET or HEAD request now ends with its block: the actor that
+    `connection()` names, a `SET`, and a session advisory lock. Search for each one that a later
+    block expects, and move both into one block.
+  - A wait through `waits.waiting` inside a block now raises `HeldAcrossAWait` outside every unit
+    too, as in the lifespan or a loop. End the block before the wait, and start a new block
+    after it.
+  - A test that counts the connections of a unit other than a GET or HEAD request counts one for
+    each block.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

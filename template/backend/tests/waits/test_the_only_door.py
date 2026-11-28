@@ -1,5 +1,5 @@
 """A wait on a system outside the process runs inside `app.waits.waiting`: the one door to it,
-which gives the connection of the unit of work back first. `docs/adr/template/0034`.
+which gives back the connection that a GET or HEAD request holds first. `docs/adr/template/0034`.
 
 The test reads each module of `app/`. A client is a name that the module imports from a module of
 `OUTSIDE`, a name that a scope binds to one or to what one makes, or an attribute of `self` that a

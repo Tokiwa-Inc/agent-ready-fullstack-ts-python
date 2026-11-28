@@ -140,7 +140,7 @@ page could hold every connection of a process.
   before it asks the loader may ask in a later turn than the other items. Whether it does depends
   on timing, so the test may not see it. A review finds it.
 - A read that a route makes outside the loader, at once with a turn, waits for the block of the
-  turn on the connection of the unit.
+  turn, because the blocks of a unit run one at a time.
 - A project's set reads are SQL on Postgres. The memory substrate answers each item from its own
   rows, and needs no loader. A route test on the memory substrate does not see a read that grows.
 - Work beside the requests, and each task and run of shared work that it starts, gets loaders of
