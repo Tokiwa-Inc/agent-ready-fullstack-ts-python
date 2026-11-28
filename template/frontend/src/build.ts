@@ -96,6 +96,7 @@ export function followTheDeployedBuild({
       }
       if (next !== null) {
         session().setItem(RELOADING_INTO, next);
+        router.history.flush();
         tab.location.reload();
         return;
       }

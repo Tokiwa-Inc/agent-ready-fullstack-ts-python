@@ -1,7 +1,7 @@
 import { focusManager } from "@tanstack/react-query";
 import {
   type AnyRouter,
-  createMemoryHistory,
+  createBrowserHistory,
   createRootRoute,
   createRoute,
   createRouter,
@@ -50,12 +50,12 @@ function aRouter(): AnyRouter {
   const two = createRoute({ getParentRoute: () => root, path: "/two" });
   return createRouter({
     routeTree: root.addChildren([one, two]),
-    history: createMemoryHistory({ initialEntries: ["/one"] }),
+    history: createBrowserHistory(),
   });
 }
 
 function aTab(session: () => Session, running = RUNNING) {
-  const reload = vi.fn();
+  const reload = vi.fn(() => window.location.pathname);
   const record = vi.fn();
   stop = followTheDeployedBuild({
     router,
@@ -83,6 +83,7 @@ async function checked(times: number): Promise<void> {
 
 beforeEach(async () => {
   answered = 0;
+  window.history.replaceState(null, "", "/one");
   router = aRouter();
   render(<RouterProvider router={router} />);
   await act(() => router.load());
@@ -90,6 +91,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   stop();
+  router.history.destroy();
   focusManager.setFocused(undefined);
 });
 
@@ -107,7 +109,7 @@ it("a tab does not reload while it runs the deployed build", async () => {
   expect(tab.record).not.toHaveBeenCalled();
 });
 
-it("a tab reloads at the next navigation after it learns of a new build, and not before", async () => {
+it("a tab reloads into where the next navigation goes after it learns of a new build, and not before", async () => {
   deploying(() => HttpResponse.json({ entry: THE_NEXT_ENTRY }));
   const tab = aTab(aSession());
 
@@ -119,6 +121,7 @@ it("a tab reloads at the next navigation after it learns of a new build, and not
   await navigateTo("/two");
 
   expect(tab.reload).toHaveBeenCalledOnce();
+  expect(tab.reload).toHaveReturnedWith("/two");
 });
 
 it("a tab learns of a new build when a navigation starts", async () => {
