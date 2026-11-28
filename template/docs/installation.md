@@ -998,6 +998,13 @@ What to expect, because it is not all free:
   - Call each client of a system outside the process inside `app.waits.waiting`, which gives the
     connection back first. `tests/waits/test_the_only_door.py` names each line that does not.
 
+- **From 0.104.0 `make lint` reads its source paths from `backend/pyproject.toml`.** codespell,
+  ruff and basedpyright check each path in `include` under `[tool.basedpyright]`.
+  `backend/devtools/lint.py` has no `SRC_PATHS` now. basedpyright runs one thread for each CPU,
+  to a maximum of 6. If you changed `SRC_PATHS`, the update conflicts in `lint.py`. Take the
+  template's lines in the conflict. Then make `include` hold the paths that your `SRC_PATHS` held.
+  The three tools do not check a path that is not in `include`, and nothing reports it.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

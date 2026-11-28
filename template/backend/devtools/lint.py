@@ -1,19 +1,36 @@
 import argparse
+import os
 import subprocess
 import sys
+import tomllib
 
 from funlog import log_calls
 from rich import get_console, print as rprint, reconfigure
 
-SRC_PATHS = ["app", "tests", "devtools"]
 PROJECT_ROOT = ".."
 DOC_PATHS = ["../README.md", "../docs"]
 COMPLEXITY_PATHS = ["app"]
 COMPLEXITY_BASELINE = ".complexity-baseline.json"
 STARTUP_BASELINE = ".startup-baseline.json"
+TYPECHECK_THREADS_MAX = 6
 
 
 reconfigure(emoji=not get_console().options.legacy_windows)
+
+
+def read_source_paths() -> list[str]:
+    with open("pyproject.toml", "rb") as handle:
+        include = tomllib.load(handle)["tool"]["basedpyright"]["include"]
+    return [str(path) for path in include]
+
+
+def typecheck_threads() -> int:
+    cpus = os.cpu_count()
+    if cpus is None:
+        raise RuntimeError(
+            "os.cpu_count() returned None. Lint needs the CPU count to set basedpyright threads."
+        )
+    return min(cpus, TYPECHECK_THREADS_MAX)
 
 
 def main() -> int:
@@ -23,16 +40,17 @@ def main() -> int:
 
     rprint()
 
+    source_paths = read_source_paths()
     errcount = 0
     if args.check:
-        errcount += run(["codespell", *SRC_PATHS, *DOC_PATHS])
-        errcount += run(["ruff", "check", *SRC_PATHS])
-        errcount += run(["ruff", "format", "--check", *SRC_PATHS])
+        errcount += run(["codespell", *source_paths, *DOC_PATHS])
+        errcount += run(["ruff", "check", *source_paths])
+        errcount += run(["ruff", "format", "--check", *source_paths])
     else:
-        errcount += run(["codespell", "--write-changes", *SRC_PATHS, *DOC_PATHS])
-        errcount += run(["ruff", "check", "--fix", *SRC_PATHS])
-        errcount += run(["ruff", "format", *SRC_PATHS])
-    errcount += run(["basedpyright", "--stats", *SRC_PATHS])
+        errcount += run(["codespell", "--write-changes", *source_paths, *DOC_PATHS])
+        errcount += run(["ruff", "check", "--fix", *source_paths])
+        errcount += run(["ruff", "format", *source_paths])
+    errcount += run(["basedpyright", "--threads", str(typecheck_threads())])
     errcount += run([sys.executable, "devtools/comments.py", "--tree", PROJECT_ROOT])
     errcount += run(
         [
