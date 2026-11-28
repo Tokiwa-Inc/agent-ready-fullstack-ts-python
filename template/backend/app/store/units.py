@@ -7,11 +7,12 @@ requests. A store reaches the database only through the unit, and the unit holds
 connection of each database at a time. So a unit never waits for a second connection while it
 holds one, and a pool of any size cannot lock.
 
-The first use of a database in the unit takes a connection from the pool. The unit gives it back
-when the unit ends, when its response starts, and at `return_the_connection`: before the unit
-waits on anything but its own connection. The next use takes a connection again.
+A block takes a connection from the pool when it starts, and gives it back when it ends. So a
+unit that waits between two blocks holds no connection, whatever it waits on. The one exception
+is a GET or HEAD request, which reads one snapshot: it holds its connection between blocks,
+until it ends, its response starts, or `return_the_connection` runs before a wait.
 
-Each use is a block. The blocks of a unit run on its connection one at a time. A block inside a
+Each use is a block. The blocks of a unit run one at a time. A block inside a
 block of the same task runs on the connection of the outer block, in the transaction of the
 outer block. A block whose transaction the outer block cannot share, and a block in a task that
 a block started, raise `BlockInsideABlock`: each would wait for ever for the outer block. Outside
@@ -19,7 +20,7 @@ every unit, as in the lifespan, a loop or a test, each block takes a connection 
 gives it back when it ends.
 
 A database that does not enforce the unit lends a second connection to a block that
-`BlockInsideABlock` would refuse, and keeps its connection across a wait inside a block.
+`BlockInsideABlock` would refuse, and holds its connection across a wait inside a block.
 `log.unit_would_refuse` names each. `UNIT_OF_WORK_MODE=evaluate` sets this.
 """
 
@@ -65,8 +66,8 @@ class BlockInsideABlock(RuntimeError):
 
 
 class HeldAcrossAWait(RuntimeError):
-    """A unit of work started to wait on something other than its connection inside a block,
-    so it would hold the connection for the whole wait."""
+    """A wait on something other than the database started inside a block, in a unit of work or
+    outside every unit, so the block would hold its connection for the whole wait."""
 
 
 @dataclass(eq=False)
@@ -169,7 +170,13 @@ class Unit:
     def held(self, database: Hashable, lender: Lender, *, enforced: bool) -> "Held":
         """What this unit holds of `database`, made on first use."""
         if database not in self._held:
-            self._held[database] = Held(lender, self._route, owner=self, enforced=enforced)
+            self._held[database] = Held(
+                lender,
+                self._route,
+                owner=self,
+                enforced=enforced,
+                holds_between_blocks=self.reads_a_snapshot,
+            )
         return self._held[database]
 
     async def finish(self) -> None:
@@ -225,27 +232,28 @@ def within[T](work: Awaitable[T], route: str) -> Coroutine[Any, Any, T]:
 
 
 async def return_the_connection(on: str) -> None:
-    """Give back each connection that the unit of work holds, before it waits on `on`. The next
-    use takes a connection again, and a read after it opens a new snapshot. Outside a unit, it
-    does nothing.
+    """Give back the connection that a GET or HEAD request holds, and end its snapshot, before the
+    request waits on `on`. A read after it opens a new snapshot. Any other unit of work holds no
+    connection between blocks, so it gives back nothing.
 
-    Raises `HeldAcrossAWait` inside a block, which holds the connection until it ends. A database
-    that does not enforce the unit holds it across the wait, and `log.unit_would_refuse` names
-    it."""
+    Raises `HeldAcrossAWait` inside a block, in a unit or outside every unit: the block holds the
+    connection until it ends. A database that does not enforce the unit holds it across the wait,
+    and `log.unit_would_refuse` names it."""
     opened = _UNIT.get()
-    if opened is None:
-        return
     inside = _INSIDE.get()
     if inside:
+        route = (lambda: None) if opened is None else opened.route
+        of = "" if opened is None else f" of {opened.route()!r}"
         refused = HeldAcrossAWait(
-            f"{on} started inside a block of {opened.route()!r}, which holds a connection for the "
-            f"whole wait. End the block before the wait."
+            f"{on} started inside a block{of}, which holds a connection for the whole wait. "
+            f"End the block before the wait."
         )
         if any(held.enforced for held in inside):
             raise refused
-        _would_refuse(opened.route, refused)
+        _would_refuse(route, refused)
         return
-    await opened.give_back()
+    if opened is not None and opened.reads_a_snapshot:
+        await opened.give_back()
 
 
 def refuse_inside_a_block(what: str) -> None:
@@ -302,15 +310,23 @@ class _Open:
 
 class Held:
     """The connection that one unit of work holds of one database, and the snapshot open on it.
-    `block` makes one for each block outside every unit."""
+    `block` makes one for each block outside every unit. Unless it `holds_between_blocks`, the
+    connection goes back to the pool when each block ends."""
 
     def __init__(
-        self, lender: Lender, route: Callable[[], str | None], *, owner: object, enforced: bool
+        self,
+        lender: Lender,
+        route: Callable[[], str | None],
+        *,
+        owner: object,
+        enforced: bool,
+        holds_between_blocks: bool = False,
     ) -> None:
         self._lender: Final = lender
         self._route: Final = route
         self._owner: Final = owner
         self.enforced: Final = enforced
+        self._holds_between_blocks: Final = holds_between_blocks
         self._conn: Any = None
         self._holder: Holder | None = None
         self._turn: Final = asyncio.Lock()
@@ -376,7 +392,7 @@ class Held:
         self._task = None
         if self._holder is not None:
             self._holder.block_ended = time.monotonic()
-        if self._given_back_when_done:
+        if self._given_back_when_done or not self._holds_between_blocks:
             self._given_back_when_done = False
             await self._ended_and_given_back()
 
@@ -563,5 +579,6 @@ def instrument(app: FastAPI) -> None:
     back before its response starts. A block after that, as in a body that streams, runs on a
     connection of its own. A GET or HEAD request reads through a snapshot. A part of
     `GET /reads` is a request of its own, so it is a unit of its own. Call it after
-    `request_events.instrument`, so the request event uses the unit's connection."""
+    `request_events.instrument`, so the request event of a GET or HEAD request uses the
+    connection that the request holds."""
     app.add_middleware(UnitPerRequest)

@@ -9,9 +9,10 @@ key, and each wait in a run has a bound under the budget. The lifespan cancels w
 running at shutdown. `docs/adr/template/0021` and `0027`.
 
 Each task of work beside the requests, and each run of shared work, is a unit of work of its own:
-`app/store/units.py`. A unit gives its connection back before each wait here, so no unit holds a
-connection while it waits on something else. A turn of a loader is the one run that a caller
-joins with its connection: it runs in the caller's unit. `docs/adr/template/0034`.
+`app/store/units.py`. A GET or HEAD request gives its connection back before each wait here, and
+any other unit holds none between blocks, so no unit holds a connection while it waits on
+something else. A turn of a loader is the one run that a caller joins without giving its
+connection back: it runs in the caller's unit. `docs/adr/template/0034`.
 """
 
 import asyncio
@@ -114,10 +115,10 @@ async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
     `on`: the system and the call, such as `"sqlserver.login"`. This is the one door to a system
     outside the process.
 
-    The unit of work gives its connection back first, through `units.return_the_connection`. The
-    next use of the database takes a connection again, and a read after the wait opens a new
-    snapshot, which sees what was committed during the wait. Raises `HeldAcrossAWait` inside a
-    block of the unit, which would hold the connection for the whole wait.
+    A GET or HEAD request gives its connection back first, through `units.return_the_connection`,
+    and a read after the wait opens a new snapshot, which sees what was committed during the wait.
+    Any other unit of work holds no connection between blocks. Raises `HeldAcrossAWait` inside a
+    block, in a unit or outside every unit, which would hold the connection for the whole wait.
 
     In a request, raises `WaitOutlastsTheRequest` before the block runs when `seconds` is not under
     `REQUEST_BUDGET_SECONDS`. In a part of `GET /reads`, raises `PartWaitsOutside` before the block
@@ -206,10 +207,10 @@ class SharedWork[K, T]:
     trace. The key names everything the result depends on, such as the tenant, the actor and the
     arguments.
 
-    Each run is a unit of work of its own, named `shared <name>`, and a caller gives its
-    connection back before it joins. With `in_the_callers_unit`, each run reads in the unit of
-    work of the caller that starts it, and a caller keeps its connection. Use it only for work
-    that the callers of one unit share, as a turn of a loader.
+    Each run is a unit of work of its own, named `shared <name>`, and a caller gives back the
+    connection it holds before it joins. With `in_the_callers_unit`, each run reads in the unit
+    of work of the caller that starts it, and a caller does not give its connection back. Use it
+    only for work that the callers of one unit share, as a turn of a loader.
     """
 
     def __init__(self, name: str, *, in_the_callers_unit: bool = False) -> None:
@@ -226,8 +227,8 @@ class SharedWork[K, T]:
         starts another run. A failure raises in each caller that awaits the run.
         `log.shared_failed` names each failure, and `log.shared_cancelled` a cancellation.
         `cancel_beside` cancels a run at shutdown. Raises `RuntimeError` when the task of a run
-        joins its own key, which would wait for ever, and `HeldAcrossAWait` inside a block of a
-        unit of work, unless the run is in the caller's unit.
+        joins its own key, which would wait for ever, and `HeldAcrossAWait` inside a block, unless
+        the run is in the caller's unit.
         """
         if not self._in_the_callers_unit:
             await units.return_the_connection(f"a run of {self._name}")

@@ -168,13 +168,13 @@ async def test_a_kept_list_of_rows_is_handed_out_as_a_copy() -> None:
         assert await fetched(pool, "a") == ["a"]
 
 
-async def test_blocks_at_once_take_turns_on_the_one_connection_of_the_unit() -> None:
+async def test_blocks_at_once_take_turns_and_the_unit_holds_one_connection_at_a_time() -> None:
     pool = Pool()
     async with a_post(), asyncio.TaskGroup() as group:
         for n in range(5):
             _ = group.create_task(fetched(pool, "a", n))
 
-    assert (pool.takes, pool.most_lent, pool.most_running) == (1, 1, 1)
+    assert (pool.most_lent, pool.most_running) == (1, 1)
     assert len(pool.sent) == 5
 
 
@@ -245,17 +245,16 @@ async def test_a_failure_that_is_not_the_database_s_keeps_the_snapshot() -> None
     assert pool.sent == [("a", ())]
 
 
-async def test_a_unit_that_does_not_read_a_snapshot_runs_each_block_in_a_transaction_of_its_own() -> (
-    None
-):
+async def test_a_unit_that_does_not_read_a_snapshot_takes_a_connection_for_each_block() -> None:
     pool = Pool()
     async with a_post():
         async with scoped(pool):
             pass
+        assert pool.lent == 0
         _ = await fetched(pool, "a")
         _ = await fetched(pool, "a")
 
-    assert pool.takes == 1
+    assert (pool.takes, pool.most_lent) == (3, 1)
     assert pool.said == [
         "begin write t",
         "commit",
@@ -354,6 +353,35 @@ async def test_a_wait_inside_a_block_is_refused() -> None:
         with pytest.raises(HeldAcrossAWait, match="outside.call"):
             async with waiting(1, on="outside.call"):
                 pass
+
+
+async def test_a_wait_inside_a_block_outside_every_unit_is_refused() -> None:
+    pool = Pool()
+    async with reading(pool):
+        with pytest.raises(HeldAcrossAWait, match="outside.call"):
+            async with waiting(1, on="outside.call"):
+                pass
+
+
+async def test_a_unit_that_waits_on_an_event_between_two_blocks_holds_no_connection() -> None:
+    pool = Pool()
+    waits, woken = asyncio.Event(), asyncio.Event()
+
+    async def waits_between_blocks() -> None:
+        async with a_post():
+            async with scoped(pool):
+                pass
+            waits.set()
+            _ = await woken.wait()
+            _ = await fetched(pool, "a")
+
+    async with asyncio.TaskGroup() as group:
+        _ = group.create_task(waits_between_blocks())
+        _ = await waits.wait()
+        assert pool.lent == 0
+        woken.set()
+
+    assert (pool.takes, pool.lent) == (2, 0)
 
 
 async def test_a_database_that_does_not_enforce_holds_across_a_wait_inside_a_block_and_reports_it(
@@ -536,12 +564,12 @@ def test_each_request_is_a_unit_that_gives_its_connection_back_before_its_respon
 
     with TestClient(app) as client:
         assert client.get("/read").json() == 1
-        assert client.post("/read").json() == 1
+        assert client.post("/read").json() == 0
 
     assert seen == [0, 0]
-    assert pool.takes == 2
+    assert pool.takes == 3
     assert pool.said == ["begin snapshot t", "commit", *["begin read t", "commit"] * 2]
-    assert [holder.unit() for holder in pool.holders] == ["GET /read", "POST /read"]
+    assert [holder.unit() for holder in pool.holders] == ["GET /read", "POST /read", "POST /read"]
 
 
 def test_a_body_that_streams_reads_on_a_connection_of_its_own_for_each_block() -> None:

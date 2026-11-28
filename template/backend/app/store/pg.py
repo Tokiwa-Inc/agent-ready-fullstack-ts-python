@@ -702,10 +702,10 @@ class PostgresDatabase:
         return loader_of((self, tenant_id), lambda: self.reading(tenant_id))
 
     def lent(self) -> AbstractAsyncContextManager[Any]:
-        """The connection of the unit of work, with no transaction of the unit's open on it: the
-        snapshot ends first. Outside a unit, a connection of its own, returned to the pool on
-        exit. It names nobody: for a block that names who acts in its own transaction, or for
-        work that writes no audited table.
+        """A connection in a block of the unit of work, with no transaction of the unit's open on
+        it: the snapshot ends first. Outside a GET or HEAD request, the connection goes back to
+        the pool when the block ends. It names nobody: for a block that names who acts in its own
+        transaction, or for work that writes no audited table.
 
         Raises `AcquireTimedOut` when no connection comes within `Timeouts.acquire`,
         `ConnectionRefused` when a new one does not open, and `ConnectionLost` when the block
@@ -715,9 +715,9 @@ class PostgresDatabase:
 
     @asynccontextmanager
     async def connection(self) -> AsyncGenerator[Any]:
-        """The connection of `lent`, which names who acts for its session. In a unit of work,
-        that session lasts until the unit gives the connection back. Raises as `lent`
-        raises."""
+        """The connection of `lent`, which names who acts for its session. The pool's reset
+        clears it when the connection goes back: when the block ends, or, in a GET or HEAD
+        request, when the unit gives it back. Raises as `lent` raises."""
         async with self.lent() as conn:
             await conn.execute(SET_ACTING, *_who_acts())
             yield conn
@@ -726,9 +726,9 @@ class PostgresDatabase:
         """A connection inside a READ ONLY transaction that has set `tenant_id`, which every
         statement that only reads tenant data runs in. In a GET or HEAD request, the request's
         snapshot: one REPEATABLE READ transaction for the request, in which each answer is kept,
-        and which sets `tenant_id` before a read of it. Otherwise, a transaction of its own on
-        the unit's connection. Inside `app.store.jobs.fenced`, the transaction is not READ ONLY,
-        and holds the claim as `scoped` does.
+        and which sets `tenant_id` before a read of it. Otherwise, a transaction of its own.
+        Inside `app.store.jobs.fenced`, the transaction is not READ ONLY, and holds the claim as
+        `scoped` does.
 
         A write raises `ReadOnlySQLTransactionError`. Raises as `lent` raises.
         `docs/adr/template/0033`."""

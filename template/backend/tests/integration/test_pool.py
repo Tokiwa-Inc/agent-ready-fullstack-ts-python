@@ -408,6 +408,29 @@ async def test_as_many_units_as_the_pool_lends_each_read_then_write_and_none_wai
         assert await conn.fetchval("SELECT count(*) FROM tasks") == at_once
 
 
+async def test_units_that_wait_between_two_blocks_share_one_connection_and_none_times_out(
+    sized: Sized,
+) -> None:
+    at_once = 3
+    database = sized(1, Timeouts(acquire=SHORT))
+    each_read = asyncio.Barrier(at_once)
+
+    async def reads_waits_then_writes(n: int) -> None:
+        async with a_unit("POST /screenshot", reads_a_snapshot=False):
+            async with database.reading(TENANT) as conn:
+                _ = await conn.fetchval("SELECT count(*) FROM tasks")
+            _ = await each_read.wait()
+            with acting_as(THE_SUITE):
+                _ = await database.store(TENANT).create(CreateTaskBody(title=f"task {n}"))
+
+    async with asyncio.timeout(TIMEOUTS.acquire), asyncio.TaskGroup() as group:
+        for n in range(at_once):
+            _ = group.create_task(reads_waits_then_writes(n))
+
+    async with database.reading(TENANT) as conn:
+        assert await conn.fetchval("SELECT count(*) FROM tasks") == at_once
+
+
 async def test_a_wait_that_finds_no_connection_names_each_holder_of_the_pool(
     sized: Sized, logged: Logged
 ) -> None:
@@ -449,7 +472,7 @@ async def test_a_connection_held_past_its_bound_is_named_while_it_is_held(
     used: list[float] = []
     database.time_uses(used.append)
 
-    async with a_unit("POST /holds", reads_a_snapshot=False):
+    async with a_unit("GET /holds"):
         for _ in range(2):
             async with database.lent() as conn:
                 _ = await conn.fetchval("SELECT 1")
@@ -457,7 +480,7 @@ async def test_a_connection_held_past_its_bound_is_named_while_it_is_held(
         named = [one for one in logged() if one["message"] == "connection held"]
 
     [held] = named
-    assert (held["route"], held["pool"]) == ("POST /holds", database.schema)
+    assert (held["route"], held["pool"]) == ("GET /holds", database.schema)
     assert held["held_ms"] >= SHORT * 1000
     assert held["idle_ms"] is not None
     [use] = used

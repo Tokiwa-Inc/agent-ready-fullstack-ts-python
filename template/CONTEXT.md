@@ -240,7 +240,7 @@ _Avoid_: batch, bulk read, multi-get.
 
 **Loader**:
 What reads the keys that the items of one request ask for in one turn of the event loop: each set
-read of the turn once, one after another, in one block on the connection of the unit of work. It
+read of the turn once, one after another, in one block of the unit of work. It
 keeps nothing past the turn.
 `PostgresDatabase.loader` answers the loader of a tenant in a request, or in an attempt of a job.
 _Avoid_: DataLoader, batcher, identity map, cache.
@@ -256,16 +256,17 @@ _Avoid_: cache, identity map, read transaction, session.
 
 **Unit of work**:
 What one request, one attempt of a job, one run of shared work, or one task of work beside the
-requests does on the database. It holds at most one connection of each database at a time, from
-its first block until it ends, its response starts, or it waits through `app.waits.waiting`. Each
-store call is one block on that connection. `app/store/units.py` holds it.
+requests does on the database. It holds at most one connection of each database at a time, and
+only while a block runs. A GET or HEAD request holds its connection between blocks, until it
+ends, its response starts, or it waits through `app.waits.waiting`, `SharedWork.joined` or
+`reads.answer`. Each store call is one block. `app/store/units.py` holds it.
 `docs/adr/template/0034`.
 _Avoid_: session, transaction (a block may open one), request scope.
 
 **Block**:
-One use of the connection of a unit of work: `lent`, `connection`, `reading` or `scoped` of
-`PostgresDatabase`. The blocks of a unit run one at a time. A block outside every unit takes a
-connection of its own.
+One use of the database by a unit of work: `lent`, `connection`, `reading` or `scoped` of
+`PostgresDatabase`. The blocks of a unit run one at a time. A block takes a connection when it
+starts and gives it back when it ends, except in a GET or HEAD request.
 _Avoid_: lend, checkout, unit.
 
 **Connection budget**:
